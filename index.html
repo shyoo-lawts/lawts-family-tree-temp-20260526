@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>가계도 자동 생성기 (베타) — 법무법인 더스마트</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
@@ -214,7 +215,7 @@
       <button onclick="resetAll()" class="btn-danger-ghost px-2.5 py-1.5">🗑️ 초기화</button>
       <div class="w-px h-5 bg-white/15"></div>
       <button onclick="downloadPNG()" class="btn-action px-3 py-1.5">📷 PNG</button>
-      <button onclick="window.print()" class="btn-action px-3 py-1.5">🖨️ PDF·인쇄</button>
+      <button onclick="downloadPDF()" class="btn-action px-3 py-1.5">📑 PDF</button>
     </div>
   </div>
 </header>
@@ -1253,7 +1254,8 @@ function zoomTree(factor) {
 // ============================================================
 // PNG / JSON 입출력
 // ============================================================
-function downloadPNG() {
+// SVG → Canvas 공통 변환 (PNG·PDF 둘 다 같은 캔버스 사용)
+function svgToCanvas(callback) {
   const svg = document.getElementById('familySvg');
   const clone = svg.cloneNode(true);
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
@@ -1283,15 +1285,51 @@ function downloadPNG() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);
+    callback(canvas);
+  };
+  img.onerror = () => alert('이미지 변환 실패. 다시 시도해주세요.');
+  img.src = url;
+}
+
+function downloadPNG() {
+  svgToCanvas(canvas => {
     const link = document.createElement('a');
     const deceased = people.find(p => p.relation === '망인');
     const fn = `가계도_${deceased?.name || '미지정'}_${new Date().toISOString().slice(0, 10)}.png`;
     link.download = fn;
     link.href = canvas.toDataURL('image/png');
     link.click();
-  };
-  img.onerror = () => alert('PNG 변환 실패. 다시 시도해주세요.');
-  img.src = url;
+  });
+}
+
+// PDF — PNG 캔버스를 jsPDF A4 가로 한 페이지에 비례 축소해 박아넣음
+function downloadPDF() {
+  if (!window.jspdf) {
+    alert('PDF 라이브러리 로딩 중입니다. 1-2초 후 다시 시도해주세요.');
+    return;
+  }
+  svgToCanvas(canvas => {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pdfW = 297, pdfH = 210;  // A4 landscape mm
+    const margin = 12;
+    const availW = pdfW - 2 * margin;
+    const availH = pdfH - 2 * margin;
+    const imgRatio = canvas.width / canvas.height;
+    let imgW = availW;
+    let imgH = imgW / imgRatio;
+    if (imgH > availH) {
+      imgH = availH;
+      imgW = imgH * imgRatio;
+    }
+    const xOffset = (pdfW - imgW) / 2;
+    const yOffset = (pdfH - imgH) / 2;
+    const imgData = canvas.toDataURL('image/png');
+    pdf.addImage(imgData, 'PNG', xOffset, yOffset, imgW, imgH);
+    const deceased = people.find(p => p.relation === '망인');
+    const fn = `가계도_${deceased?.name || '미지정'}_${new Date().toISOString().slice(0, 10)}.pdf`;
+    pdf.save(fn);
+  });
 }
 
 function exportJSON() {
