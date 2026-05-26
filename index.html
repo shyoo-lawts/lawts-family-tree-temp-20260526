@@ -1255,10 +1255,22 @@ function zoomTree(factor) {
 // PNG / JSON 입출력
 // ============================================================
 // SVG → Canvas 공통 변환 (PNG·PDF 둘 다 같은 캔버스 사용)
+// 화면용 viewBox 무시하고 실제 컨텐츠 bbox에 맞춰 export — 빈 공간 X
 function svgToCanvas(callback) {
   const svg = document.getElementById('familySvg');
+  // 실제 그려진 컨텐츠 영역 (화면 viewBox·컴팩트 factor 무관)
+  const bbox = svg.getBBox();
+  const padding = 24;
+  const exportX = bbox.x - padding;
+  const exportY = bbox.y - padding;
+  const exportW = bbox.width + 2 * padding;
+  const exportH = bbox.height + 2 * padding;
+
   const clone = svg.cloneNode(true);
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('viewBox', `${exportX} ${exportY} ${exportW} ${exportH}`);
+  clone.setAttribute('width', exportW);
+  clone.setAttribute('height', exportH);
   // 인라인 스타일 강제
   clone.querySelectorAll('.marriage-line').forEach(el => {
     el.setAttribute('stroke', '#475569');
@@ -1274,12 +1286,10 @@ function svgToCanvas(callback) {
   const url = URL.createObjectURL(svgBlob);
   const img = new Image();
   img.onload = function() {
-    const vb = svg.getAttribute('viewBox').split(' ').map(Number);
-    const w = vb[2], h = vb[3];
     const scale = 2; // 고해상도
     const canvas = document.createElement('canvas');
-    canvas.width = w * scale;
-    canvas.height = h * scale;
+    canvas.width = exportW * scale;
+    canvas.height = exportH * scale;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
