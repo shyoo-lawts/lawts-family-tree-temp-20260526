@@ -1,0 +1,1351 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>가계도 자동 생성기 (베타) — 법무법인 더스마트</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* 더스마트 브랜드 토큰 (web/app/globals.css 기반) */
+  :root {
+    --navy: #0a192f;
+    --navy-light: #112240;
+    --navy-bright: #233554;
+    --primary: #2C2E5C;       /* 다크 네이비 — 헤더·주 버튼 */
+    --accent: #1E9BDD;        /* 라이트 블루 — 강조·링크 */
+    --text: #0a192f;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --card-bg: #ffffff;
+  }
+  body {
+    font-family: 'Outfit', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: radial-gradient(circle at top right, #f8fafc, #eef2f7);
+    color: var(--text);
+    min-height: 100dvh;
+  }
+  .font-serif { font-family: 'Noto Serif KR', serif; }
+
+  /* 입력 셀 */
+  .cell { @apply w-full px-1.5 py-1 text-xs border rounded bg-white; border-color: var(--border); min-width: 0; }
+  .cell:focus { @apply outline-none ring-2; ring-color: var(--accent); border-color: var(--accent); }
+  /* 표 컬럼 너비 강제 */
+  table.fixed-cols { table-layout: fixed; }
+
+  /* 가계도 박스 — translateY 안 씀 (박스가 떠오르면 마우스가 빠져 hover 무한 반복됨) */
+  .person-box { cursor: pointer; transition: filter 0.15s; }
+  .person-box:hover { filter: brightness(1.05); }
+  .marriage-line { stroke: #475569; stroke-width: 2; }
+  .parent-line { stroke: #94a3b8; stroke-width: 1.5; fill: none; }
+  .heir-glow { filter: drop-shadow(0 0 6px #f59e0b); }
+
+  /* 더스마트 카드 — 부드러운 흰 카드 + 미세 그림자 */
+  .ds-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(10, 25, 47, 0.04), 0 8px 24px rgba(10, 25, 47, 0.04);
+  }
+
+  /* 헤더 그라데이션 (브랜드) */
+  .ds-header {
+    background: linear-gradient(135deg, #0a192f 0%, #112240 50%, #233554 100%);
+    box-shadow: 0 4px 16px rgba(10, 25, 47, 0.15);
+  }
+
+  /* 네이비 그라데이션 버튼 (강조) */
+  .btn-navy {
+    background: linear-gradient(135deg, #0a192f, #112240);
+    color: white;
+    border-radius: 8px;
+    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    font-weight: 600;
+  }
+  .btn-navy:hover { background: var(--accent); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(30, 155, 221, 0.25); }
+  .btn-navy:active { transform: translateY(0); }
+
+  /* 보조 버튼 (헤더 안) */
+  .btn-ghost {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f1f5f9;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    transition: all 0.2s;
+    font-weight: 500;
+  }
+  .btn-ghost:hover { background: rgba(255, 255, 255, 0.16); border-color: rgba(255, 255, 255, 0.25); }
+
+  /* 위험 액션 — 초기화 */
+  .btn-danger-ghost {
+    background: rgba(220, 38, 38, 0.15);
+    color: #fecaca;
+    border: 1px solid rgba(220, 38, 38, 0.35);
+    border-radius: 8px;
+    transition: all 0.2s;
+    font-weight: 500;
+  }
+  .btn-danger-ghost:hover { background: rgba(220, 38, 38, 0.3); color: white; }
+
+  /* 강조 액션 — PNG·PDF (액센트 톤) */
+  .btn-action {
+    background: linear-gradient(135deg, #1E9BDD, #0ea5e9);
+    color: white;
+    border-radius: 8px;
+    transition: all 0.2s;
+    font-weight: 600;
+  }
+  .btn-action:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(30, 155, 221, 0.35); }
+
+  /* 페이지 제목 (명조) */
+  .page-h2 {
+    font-family: 'Noto Serif KR', serif;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  /* 순위 chip (ERP d-day 스타일) */
+  .rank-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+  .rank-chip.r1 { background: color-mix(in oklab, var(--primary), transparent 80%); color: var(--primary); }
+  .rank-chip.r2 { background: color-mix(in oklab, var(--accent), transparent 80%); color: var(--accent); }
+  .rank-chip.r3 { background: #fef3c7; color: #92400e; }
+  .rank-chip.r4 { background: #fee2e2; color: #991b1b; }
+  .rank-chip.none { background: #f1f5f9; color: var(--text-muted); }
+
+  /* 헤더 베타 배지 */
+  .beta-badge {
+    background: linear-gradient(135deg, #1E9BDD, #0ea5e9);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    letter-spacing: 0.05em;
+  }
+
+  /* 안내 노트 (변호사 검증 필수) */
+  .notice {
+    background: rgba(30, 155, 221, 0.08);
+    border: 1px solid rgba(30, 155, 221, 0.25);
+    color: #075985;
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  /* 로고 — 작은 그림자 */
+  .ds-logo { filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25)); }
+
+  /* SVG 컨테이너 */
+  #svgWrap { overflow: auto; max-height: calc(100vh - 320px); background: #fafbfc; border-radius: 10px; }
+
+  /* 표 행 호버 */
+  tbody tr:hover { background: #f8fafc; }
+  thead th { font-family: 'Outfit', 'Noto Sans KR', sans-serif; color: var(--text-muted); font-weight: 600; letter-spacing: 0.02em; }
+
+  /* 인쇄 */
+  @media print {
+    .no-print { display: none !important; }
+    .print-area { width: 100% !important; max-width: none !important; }
+    body { background: white !important; }
+    .ds-card { box-shadow: none !important; border: 1px solid #e2e8f0; }
+    @page { size: A4 landscape; margin: 10mm; }
+  }
+
+  /* 숫자 폭 통일 */
+  .num, .font-mono, [data-num] { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+</style>
+</head>
+<body class="min-h-screen text-slate-800">
+
+<!-- ========== 헤더 ========== -->
+<header class="ds-header text-white px-4 sm:px-6 py-3.5 no-print">
+  <div class="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <img src="logo.png" alt="더스마트" class="ds-logo h-10 w-10 object-contain shrink-0">
+      <div>
+        <h1 class="font-serif text-lg sm:text-xl font-bold flex items-center gap-2 leading-tight">
+          가계도 자동 생성기
+          <span class="beta-badge">BETA v0.1</span>
+        </h1>
+        <p class="text-[11px] text-slate-300 mt-0.5 tracking-wide">법무법인 더스마트 · 한정승인 / 상속포기 사건용 · 변호사 검수 필수</p>
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-1.5 text-xs">
+      <div class="flex gap-1">
+        <button onclick="loadSample('lineal')" class="btn-ghost px-2.5 py-1.5">📂 직계</button>
+        <button onclick="loadSample('substitute')" class="btn-ghost px-2.5 py-1.5">📂 대습</button>
+        <button onclick="loadSample('sibling')" class="btn-ghost px-2.5 py-1.5">📂 형제</button>
+      </div>
+      <div class="w-px h-5 bg-white/15"></div>
+      <button onclick="exportJSON()" class="btn-ghost px-2.5 py-1.5">💾 JSON</button>
+      <label class="btn-ghost px-2.5 py-1.5 cursor-pointer">
+        📥 불러오기
+        <input type="file" accept=".json" onchange="importJSON(event)" class="hidden">
+      </label>
+      <button onclick="resetAll()" class="btn-danger-ghost px-2.5 py-1.5">🗑️ 초기화</button>
+      <div class="w-px h-5 bg-white/15"></div>
+      <button onclick="downloadPNG()" class="btn-action px-3 py-1.5">📷 PNG</button>
+      <button onclick="window.print()" class="btn-action px-3 py-1.5">🖨️ PDF·인쇄</button>
+    </div>
+  </div>
+</header>
+
+<!-- ========== 본문 ========== -->
+<main class="max-w-[1600px] mx-auto p-4 grid grid-cols-12 gap-4 print-area">
+
+  <!-- 좌측: 입력 표 -->
+  <section class="col-span-12 lg:col-span-5 no-print">
+    <div class="ds-card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="page-h2">인적사항 입력</h2>
+        <button onclick="addPerson()" class="btn-navy text-xs px-3 py-1.5">＋ 행 추가</button>
+      </div>
+
+      <!-- 도움말 토글 -->
+      <details class="mb-2 text-xs">
+        <summary class="cursor-pointer text-blue-600 hover:underline font-medium">📖 입력 가이드 펼치기</summary>
+        <div class="mt-2 p-3 bg-blue-50 rounded text-slate-700 space-y-1.5 leading-relaxed">
+          <p><b>① 망인</b>: 반드시 1명만 지정. 사망 일자도 입력.</p>
+          <p><b>② 관계</b>: <i>망인 기준</i>으로 선택. (예: 망인의 자녀 → '자녀', 망인의 부 → '부')</p>
+          <p><b>③ 부모</b>: 손자녀·조카·자녀의배우자만 드롭다운에서 부모 선택. (다른 행에선 "-"로 비활성)</p>
+          <p><b>④ 상태</b>: 한정승인 / 상속포기 / 사망 / 생존 (가계도에는 <b class="text-emerald-700">한정</b>·<b class="text-rose-700">상포</b> 캡슐 배지로 표시)</p>
+          <p><b>⑤ 대습상속</b>: 자녀가 망인보다 먼저 사망 → 그 자녀의 자녀(손자녀)가 대신 상속. 자녀를 '사망'으로 두고 손자녀의 부모를 그 자녀로 선택.</p>
+          <p class="text-amber-700"><b>⚠️ 한정승인</b>은 상속인 자격 유지(책임만 한도내 제한). <b>상속포기</b>만 상속인에서 제외됨.</p>
+        </div>
+      </details>
+
+      <div class="overflow-auto" style="max-height: calc(100vh - 280px)">
+        <table class="w-full text-xs fixed-cols">
+          <thead class="bg-slate-100 sticky top-0">
+            <tr class="border-b border-slate-300">
+              <th class="px-1 py-2 w-8">#</th>
+              <th class="px-1 py-2 text-left" style="width:60px">이름</th>
+              <th class="px-1 py-2 text-left w-20">관계</th>
+              <th class="px-1 py-2 text-center w-16">부모</th>
+              <th class="px-1 py-2 text-left w-10">성별</th>
+              <th class="px-1 py-2 text-left" style="width:42px">생년</th>
+              <th class="px-1 py-2 text-left w-24">사망일</th>
+              <th class="px-1 py-2 text-left w-16">상태</th>
+              <th class="px-1 py-2 w-8"></th>
+            </tr>
+          </thead>
+          <tbody id="peopleTable"></tbody>
+        </table>
+      </div>
+
+      <p class="text-[11px] text-slate-500 mt-3">💾 입력 내용은 브라우저에 자동 저장됩니다.</p>
+    </div>
+  </section>
+
+  <!-- 우측: 가계도 + 상속인 -->
+  <section class="col-span-12 lg:col-span-7 print-area">
+    <!-- 상속인 요약 -->
+    <div class="ds-card p-4 mb-4">
+      <h2 class="page-h2 mb-2 flex items-center gap-2">
+        ⚖ 상속인 자동 분석
+        <span class="notice">변호사 검증 필수</span>
+        <label class="ml-auto flex items-center gap-1.5 text-xs cursor-pointer select-none font-normal">
+          <input type="checkbox" id="claimLabelToggle" onchange="toggleClaimLabel(this.checked)" class="w-4 h-4 accent-slate-600">
+          <span title="박스에 '피상속인 망 / 청구인 / 청구외 망 / 청구외' 라벨 표시">실무 표기</span>
+        </label>
+        <label class="flex items-center gap-1.5 text-xs cursor-pointer select-none font-normal">
+          <input type="checkbox" id="autoHeirToggle" checked onchange="toggleAutoHeir(this.checked)" class="w-4 h-4 accent-amber-600">
+          <span>자동 판정</span>
+        </label>
+      </h2>
+      <div id="heirSummary" class="text-sm text-slate-700 space-y-1.5"></div>
+    </div>
+
+    <!-- SVG 가계도 -->
+    <div class="ds-card p-4">
+      <div class="flex items-center justify-between mb-2 no-print">
+        <h2 class="page-h2">가계도</h2>
+        <div class="flex items-center gap-3 text-xs">
+          <label class="flex items-center gap-1.5 cursor-pointer select-none">
+            <input type="checkbox" id="compactToggle" onchange="toggleCompact(this.checked)" class="w-4 h-4 accent-slate-600">
+            <span title="가족이 많을 때 viewBox 1.5배 확장 (박스 비례 축소)">컴팩트</span>
+          </label>
+          <div class="flex gap-1">
+            <button onclick="zoomTree(1.2)" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded">🔍＋</button>
+            <button onclick="zoomTree(0.83)" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded">🔍－</button>
+            <button onclick="zoomTree(0)" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded">⟲ 원위치</button>
+          </div>
+        </div>
+      </div>
+      <div id="svgWrap" class="border border-slate-200 rounded">
+        <svg id="familySvg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" style="width:100%; height:auto; min-width: 900px;"></svg>
+      </div>
+      <!-- 범례 -->
+      <div class="mt-3 flex flex-wrap gap-3 text-[11px] text-slate-600">
+        <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 bg-rose-100 border-2 border-rose-600 rounded"></span><span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] font-bold">✝</span> 망인</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 bg-amber-100 border-2 border-amber-600 rounded heir-glow"></span><span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold">★</span> 현 상속인</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 bg-slate-100 border border-slate-400 rounded"></span> 가족 일반(생존)</span>
+        <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 bg-slate-300 border-2 border-slate-600 rounded"></span><span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-600 text-white text-[10px] font-bold">故</span> 사망</span>
+        <span class="flex items-center gap-1.5"><span class="inline-flex items-center justify-center px-1.5 py-px rounded-full bg-emerald-600 text-white text-[10px] font-bold">한정</span>= 한정승인</span>
+        <span class="flex items-center gap-1.5"><span class="inline-flex items-center justify-center px-1.5 py-px rounded-full bg-rose-700 text-white text-[10px] font-bold">상포</span>= 상속포기</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- 푸터 -->
+<footer class="max-w-[1600px] mx-auto px-4 sm:px-6 pb-6 pt-2 text-[11px] no-print">
+  <div class="flex flex-wrap items-center gap-3 text-slate-500 border-t border-slate-200 pt-3">
+    <span class="font-serif font-semibold text-slate-700">법무법인 더스마트</span>
+    <span class="text-slate-300">·</span>
+    <span>채무대응팀 · 2026-05</span>
+    <span class="text-slate-300 hidden sm:inline">·</span>
+    <span class="text-amber-700 sm:ml-auto">⚠ 자동 분석은 참고용입니다. 실제 사건은 반드시 담당 변호사 검토 후 진행하세요.</span>
+  </div>
+</footer>
+
+<script>
+// ============================================================
+// 데이터 모델 + 저장
+// ============================================================
+const STORAGE_KEY = 'lawts_family_tree_v1';
+
+// 관계 옵션 (망인 기준)
+const RELATIONS = [
+  '망인','배우자',
+  '자녀','자녀의배우자','손자녀',
+  '부','모','조부','조모','외조부','외조모',
+  '형제자매','형제자매의배우자','조카','조카의배우자','조카의자녀','4촌',
+  '기타'
+];
+
+const STATUSES = [
+  {value: 'alive',    label: '생존',      color: 'bg-white'},
+  {value: 'limited',  label: '한정승인',  color: 'bg-emerald-50'},
+  {value: 'renounce', label: '상속포기',  color: 'bg-rose-50'},
+  {value: 'deceased', label: '사망',      color: 'bg-slate-200'}
+];
+
+let people = [];
+let nextId = 1;
+let zoomLevel = 1;
+let autoHeirEnabled = true;   // 자동 상속 판정 ON/OFF
+let useClaimLabel = false;    // 청구인/청구외 라벨 표시 (실무 표기)
+let compactMode = false;      // 컴팩트 모드 (큰 가족용 viewBox 확대)
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({people, nextId, autoHeirEnabled, useClaimLabel, compactMode}));
+}
+function load() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    people = data.people || [];
+    nextId = data.nextId || (people.length + 1);
+    if (typeof data.autoHeirEnabled === 'boolean') autoHeirEnabled = data.autoHeirEnabled;
+    if (typeof data.useClaimLabel === 'boolean') useClaimLabel = data.useClaimLabel;
+    if (typeof data.compactMode === 'boolean') compactMode = data.compactMode;
+  } catch(e) { console.warn('load fail', e); }
+}
+
+function toggleAutoHeir(enabled) {
+  autoHeirEnabled = enabled;
+  save();
+  render();
+}
+
+function toggleClaimLabel(enabled) {
+  useClaimLabel = enabled;
+  save();
+  render();
+}
+
+function toggleCompact(enabled) {
+  compactMode = enabled;
+  save();
+  render();
+}
+
+// 청구인/청구외 라벨 결정
+function getClaimLabel(p) {
+  if (p.relation === '망인') return '피상속인 망';
+  if (p.status === 'limited' || p.status === 'renounce') return '청구인';
+  if (p.status === 'deceased') return '청구외 망';
+  return '청구외';
+}
+
+function newPerson(overrides = {}) {
+  return {
+    id: nextId++,
+    name: '',
+    relation: '기타',
+    parentId: '',  // 부모(망인 기준 가족 내 부모) ID — 자녀/손자녀/조카 표시
+    gender: '',    // M / F
+    birthYear: '',
+    deathDate: '',
+    status: 'alive',
+    ...overrides
+  };
+}
+
+function addPerson(overrides) {
+  people.push(newPerson(overrides));
+  save();
+  render();
+}
+
+function deletePerson(id) {
+  if (!confirm('이 행을 삭제하시겠습니까?')) return;
+  people = people.filter(p => p.id !== id);
+  // 삭제된 사람을 부모로 참조하는 행의 parentId 자동 정리 (dangling 방지)
+  people.forEach(p => {
+    if (String(p.parentId) === String(id)) p.parentId = '';
+  });
+  save();
+  render();
+}
+
+function updateField(id, field, value) {
+  const p = people.find(x => x.id === id);
+  if (!p) return;
+  p[field] = value;
+  // 사망일 입력 시 상태 자동 변경
+  if (field === 'deathDate' && value && p.status === 'alive') {
+    p.status = 'deceased';
+  }
+  save();
+  render();
+}
+
+function resetAll() {
+  if (!confirm('모든 데이터를 지웁니다. 진행할까요?')) return;
+  people = [];
+  nextId = 1;
+  save();
+  render();
+}
+
+// ============================================================
+// 표 렌더링
+// ============================================================
+function renderTable() {
+  const tbody = document.getElementById('peopleTable');
+  if (people.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-400">
+      행을 추가하거나 상단의 샘플을 불러오세요.
+    </td></tr>`;
+    return;
+  }
+  // 부모 지정이 필요한 관계만
+  const needsParent = (rel) => ['손자녀','조카','자녀의배우자','형제자매의배우자','조카의배우자','조카의자녀'].includes(rel);
+
+  tbody.innerHTML = people.map((p, i) => {
+    const stRow = STATUSES.find(s => s.value === p.status) || STATUSES[0];
+
+    // 부모 셀: 필요한 관계만 드롭다운, 나머지는 회색 "-"
+    const parentCell = needsParent(p.relation)
+      ? `<select class="cell" onchange="updateField(${p.id}, 'parentId', this.value)" title="부모 선택">
+           <option value="">- 선택 -</option>
+           ${people.filter(x => x.id !== p.id).map(x =>
+             `<option value="${x.id}" ${String(p.parentId||'')===String(x.id)?'selected':''}>${escapeAttr(x.name) || `#${x.id}`}</option>`
+           ).join('')}
+         </select>`
+      : `<span class="text-slate-300 text-center block">-</span>`;
+
+    return `
+    <tr class="border-b border-slate-200 ${stRow.color}">
+      <td class="px-1 py-1 text-center font-mono text-slate-500">${p.id}</td>
+      <td class="px-1 py-1">
+        <input class="cell" style="width: 56px" value="${escapeAttr(p.name)}" placeholder="이름"
+               onchange="updateField(${p.id}, 'name', this.value)">
+      </td>
+      <td class="px-1 py-1">
+        <select class="cell" onchange="updateField(${p.id}, 'relation', this.value)">
+          ${RELATIONS.map(r => `<option value="${r}" ${p.relation===r?'selected':''}>${r}</option>`).join('')}
+        </select>
+      </td>
+      <td class="px-1 py-1">
+        ${parentCell}
+      </td>
+      <td class="px-1 py-1">
+        <select class="cell" onchange="updateField(${p.id}, 'gender', this.value)">
+          <option value="" ${!p.gender?'selected':''}>-</option>
+          <option value="M" ${p.gender==='M'?'selected':''}>남</option>
+          <option value="F" ${p.gender==='F'?'selected':''}>여</option>
+        </select>
+      </td>
+      <td class="px-1 py-1">
+        <input class="cell" style="width: 42px" value="${escapeAttr(p.birthYear)}" placeholder="YYYY"
+               onchange="updateField(${p.id}, 'birthYear', this.value)">
+      </td>
+      <td class="px-1 py-1">
+        <input type="date" class="cell" value="${escapeAttr(p.deathDate)}"
+               onchange="updateField(${p.id}, 'deathDate', this.value)">
+      </td>
+      <td class="px-1 py-1">
+        <select class="cell" onchange="updateField(${p.id}, 'status', this.value)">
+          ${STATUSES.map(s => `<option value="${s.value}" ${p.status===s.value?'selected':''}>${s.label}</option>`).join('')}
+        </select>
+      </td>
+      <td class="px-1 py-1 text-center">
+        <button onclick="deletePerson(${p.id})" class="text-rose-500 hover:text-rose-700" title="삭제">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function escapeAttr(s) {
+  return String(s ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// ============================================================
+// 상속인 자동 계산 (민법 1000조~1003조)
+// ============================================================
+function calculateHeirs() {
+  const deceased = people.find(p => p.relation === '망인');
+  if (!deceased) return null;
+
+  const isHeirCandidate = p => p && p.status !== 'renounce' && p.status !== 'deceased';
+
+  // 배우자 — 포기·사망 모두 제외 (사망한 배우자는 상속인 자격 X)
+  const spouse = people.find(p => p.relation === '배우자' && isHeirCandidate(p));
+
+  // ① 1순위: 직계비속
+  const children = people.filter(p => p.relation === '자녀');
+  const order1 = [];
+  children.forEach(c => {
+    if (c.status === 'renounce') return; // 포기 = 제외
+    if (c.status === 'deceased') {
+      // 대습상속: 그 자녀의 자녀(손자녀)
+      const grandkids = people.filter(p =>
+        p.relation === '손자녀' && String(p.parentId) === String(c.id) && p.status !== 'renounce'
+      );
+      grandkids.forEach(g => order1.push({...g, _substitute: true, _substituteFrom: c.name || `자녀${c.id}`}));
+    } else {
+      order1.push(c);
+    }
+  });
+  // 부모ID 없이 손자녀만 입력한 경우(상속받지 못한 자녀가 모두 포기로 처리되었을 때)
+  // — 여기선 보수적으로 자녀 모두 포기 시 손자녀는 별도 처리 안 함 (이건 손자녀 본위 상속 아님)
+
+  if (order1.length > 0) {
+    return {
+      order: 1,
+      heirIds: new Set([...order1.map(h => h.id), ...(spouse ? [spouse.id] : [])]),
+      heirs: spouse ? [...order1, spouse] : order1,
+      label: spouse ? '1순위 직계비속 + 배우자 공동상속' : '1순위 직계비속 단독상속',
+      note: spouse
+        ? '직계비속 1: 배우자 1.5 비율로 분배 (민법 1009조 ②)'
+        : '직계비속 균등분배',
+      hasSubstitute: order1.some(h => h._substitute)
+    };
+  }
+
+  // ② 2순위: 직계존속 (1순위 전원 부재/포기 시)
+  const parents = people.filter(p => ['부','모'].includes(p.relation));
+  let order2 = parents.filter(isHeirCandidate);
+  if (order2.length === 0) {
+    // 부모 전원 사망/없음 → 조부모로
+    order2 = people.filter(p =>
+      ['조부','조모','외조부','외조모'].includes(p.relation) && isHeirCandidate(p)
+    );
+  }
+
+  if (order2.length > 0) {
+    return {
+      order: 2,
+      heirIds: new Set([...order2.map(h => h.id), ...(spouse ? [spouse.id] : [])]),
+      heirs: spouse ? [...order2, spouse] : order2,
+      label: spouse ? '2순위 직계존속 + 배우자 공동상속' : '2순위 직계존속 단독상속',
+      note: spouse
+        ? '직계존속 1: 배우자 1.5 비율로 분배 (민법 1009조 ②)'
+        : '직계존속 균등분배'
+    };
+  }
+
+  // ③ 배우자만 있을 때 → 배우자 단독
+  if (spouse) {
+    return {
+      order: 0,
+      heirIds: new Set([spouse.id]),
+      heirs: [spouse],
+      label: '배우자 단독상속',
+      note: '직계비속·직계존속 모두 없으므로 배우자 단독 (민법 1003조 ①)'
+    };
+  }
+
+  // ④ 3순위: 형제자매 + 다단계 대습 (조카, 조카의자녀)
+  const allSiblings = people.filter(p => p.relation === '형제자매');
+  const order3 = [];
+  allSiblings.forEach(s => {
+    if (s.status === 'renounce') return;  // 포기 = 제외
+    if (s.status === 'deceased') {
+      // 1단계 대습: 형제자매의 자녀(조카)
+      const nephewsOfS = people.filter(p =>
+        p.relation === '조카' && String(p.parentId) === String(s.id)
+      );
+      nephewsOfS.forEach(n => {
+        if (n.status === 'renounce') return;
+        if (n.status === 'deceased') {
+          // 2단계 대습: 조카의 자녀(종손)
+          const grandnephews = people.filter(p =>
+            p.relation === '조카의자녀' && String(p.parentId) === String(n.id) && p.status !== 'renounce'
+          );
+          grandnephews.forEach(g => order3.push({
+            ...g, _substitute: true,
+            _substituteFrom: `${n.name || '조카#'+n.id}→${s.name || '형제#'+s.id}`
+          }));
+        } else {
+          order3.push({...n, _substitute: true, _substituteFrom: s.name || `형제#${s.id}`});
+        }
+      });
+    } else {
+      order3.push(s);
+    }
+  });
+
+  if (order3.length > 0) {
+    return {
+      order: 3,
+      heirIds: new Set(order3.map(h => h.id)),
+      heirs: order3,
+      label: '3순위 형제자매 상속',
+      note: '균등분배 (형제 사망 → 조카·종손 다단계 대습 자동 반영)',
+      hasSubstitute: order3.some(h => h._substitute)
+    };
+  }
+
+  // ⑤ 4순위: 4촌 이내 방계
+  const cousins = people.filter(p => ['조카','4촌'].includes(p.relation) && isHeirCandidate(p));
+  if (cousins.length > 0) {
+    return {
+      order: 4,
+      heirIds: new Set(cousins.map(h => h.id)),
+      heirs: cousins,
+      label: '4순위 4촌 이내 방계혈족',
+      note: '균등분배. 4촌 이내 방계혈족이 다수면 촌수 순서 우선'
+    };
+  }
+
+  return {
+    order: -1,
+    heirIds: new Set(),
+    heirs: [],
+    label: '상속인 없음',
+    note: '특별연고자 분여 청구 또는 국가귀속 검토 (민법 1057조의2, 1058조)'
+  };
+}
+
+function renderHeirSummary() {
+  const el = document.getElementById('heirSummary');
+  const deceasedList = people.filter(p => p.relation === '망인');
+  const deceased = deceasedList[0];
+  if (!deceased) {
+    el.innerHTML = '<p class="text-slate-400">표에서 <b>망인 1명</b>을 지정하면 상속인이 자동 분석됩니다.</p>';
+    return;
+  }
+  if (!autoHeirEnabled) {
+    el.innerHTML = '<p class="text-slate-500">⏸ <b>자동 판정 OFF</b> — 가계도의 ★ 상속인 표시도 끔. 변호사가 직접 검토하세요.</p>';
+    return;
+  }
+  const result = calculateHeirs();
+  if (!result) { el.innerHTML = '<p class="text-slate-400">분석 불가</p>'; return; }
+
+  // 망인 2명 이상 입력 시 경고
+  const multipleWarning = deceasedList.length > 1
+    ? `<div class="bg-rose-50 border border-rose-300 text-rose-800 text-xs px-2 py-1 rounded mb-2">⚠️ '망인'으로 지정된 인원이 ${deceasedList.length}명입니다. 첫 번째(${deceased.name||'#'+deceased.id})만 기준으로 분석됩니다.</div>`
+    : '';
+
+  // 자녀 전원 포기 + 손자녀 있음 → 손자녀 본위상속 가능성 안내
+  const children = people.filter(p => p.relation === '자녀');
+  const allChildrenRenounced = children.length > 0 && children.every(c => c.status === 'renounce');
+  const grandkidsAlive = people.filter(p => p.relation === '손자녀' && p.status !== 'renounce' && p.status !== 'deceased');
+  const substitutionWarning = (allChildrenRenounced && grandkidsAlive.length > 0)
+    ? `<div class="bg-purple-50 border border-purple-300 text-purple-800 text-xs px-2 py-1 rounded mb-2">🔍 자녀 전원이 상속포기 + 손자녀 생존 — <b>손자녀 본위상속</b> 검토 필요 (대법원 2015므8351 판례 등). 현재 자동 판정은 2순위로 넘김.</div>`
+    : '';
+
+  const orderBadge = result.order > 0
+    ? `<span class="rank-chip r${result.order}">${result.order}순위</span>`
+    : (result.order === 0
+        ? `<span class="rank-chip r2">배우자단독</span>`
+        : `<span class="rank-chip none">없음</span>`);
+
+  const heirNames = result.heirs.length === 0
+    ? '<span class="text-slate-400">(없음)</span>'
+    : result.heirs.map(h => {
+        const tag = h._substitute ? `<span class="text-xs text-purple-700">(대습 ← ${h._substituteFrom})</span>` : '';
+        const stTag = h.status === 'limited'
+          ? '<span class="ml-1 text-[10px] bg-emerald-600 text-white px-1.5 py-px rounded-full font-bold">한정</span>'
+          : '';
+        return `<span class="inline-block bg-amber-50 border border-amber-300 px-2 py-0.5 rounded mx-0.5 my-0.5">${h.name || '(무명)'}${stTag} ${tag}</span>`;
+      }).join('');
+
+  // 사실 요약
+  const renouncedCount = people.filter(p => p.status === 'renounce').length;
+  const limitedCount = people.filter(p => p.status === 'limited').length;
+
+  el.innerHTML = `
+    ${multipleWarning}
+    ${substitutionWarning}
+    <div class="flex items-center gap-2 flex-wrap">
+      ${orderBadge}
+      <b>${result.label}</b>
+    </div>
+    <div class="mt-2">현 상속인: ${heirNames}</div>
+    <p class="text-xs text-slate-500 mt-1">📐 ${result.note}</p>
+    ${result.hasSubstitute ? '<p class="text-xs text-purple-700 mt-1">🔁 대습상속 발생 (자녀 사망 → 손자녀가 대신 상속)</p>' : ''}
+    <div class="text-xs text-slate-500 mt-2 flex gap-4">
+      <span>📊 입력 인원 ${people.length}명</span>
+      <span>한정승인 ${limitedCount}명</span>
+      <span>상속포기 ${renouncedCount}명</span>
+    </div>
+  `;
+}
+
+// ============================================================
+// SVG 가계도 렌더링
+// ============================================================
+const BOX_W = 110, BOX_H = 56;
+const GEN_Y = 150;   // 세대 간 간격
+const HORI_X = 140;  // 같은 세대 박스 간격
+
+function renderTree() {
+  const svg = document.getElementById('familySvg');
+  svg.innerHTML = '';
+
+  const deceased = people.find(p => p.relation === '망인');
+  if (!deceased) {
+    svg.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="#94a3b8" font-size="16">
+      좌측 표에서 망인을 지정하면 가계도가 그려집니다
+    </text>`;
+    return;
+  }
+
+  // === 위치 계산 ===
+  const pos = {};
+  const cx = 700, cy = 450; // 망인 중심
+
+  pos[deceased.id] = { x: cx, y: cy };
+
+  // 배우자 (망인 우측)
+  const spouse = people.find(p => p.relation === '배우자');
+  if (spouse) pos[spouse.id] = { x: cx + HORI_X, y: cy };
+
+  // 형제자매 (망인 좌측, 여러 명이면 좌로 펼침)
+  // 배우자 있는 형제는 본인 위치 후 다음 형제를 위해 배우자 폭만큼 추가 이격
+  const siblings = people.filter(p => p.relation === '형제자매');
+  const siblingSpouses = people.filter(p => p.relation === '형제자매의배우자');
+  const sibHasSpouse = (sid) => siblingSpouses.some(ss => String(ss.parentId) === String(sid));
+  let xOffset = 0;
+  siblings.forEach((s, i) => {
+    xOffset += HORI_X;
+    pos[s.id] = { x: cx - xOffset, y: cy };
+    // 배우자가 좌측에 들어가므로 다음 형제는 배우자 폭만큼 더 좌측으로
+    if (sibHasSpouse(s.id)) {
+      xOffset += HORI_X * 0.95;
+    }
+  });
+
+  // 형제자매의 배우자 (해당 형제 좌측에 배치)
+  siblingSpouses.forEach(ss => {
+    const parentSib = people.find(p => String(p.id) === String(ss.parentId));
+    if (parentSib && pos[parentSib.id]) {
+      pos[ss.id] = { x: pos[parentSib.id].x - HORI_X * 0.95, y: pos[parentSib.id].y };
+    }
+  });
+
+  // 부 / 모 (위 세대)
+  const fa = people.find(p => p.relation === '부');
+  const mo = people.find(p => p.relation === '모');
+  // 부모 X 좌표: 형제자매들 포함 자식 중앙 위로 오게
+  const childrenOfParents = [deceased, ...siblings].filter(Boolean);
+  const childrenXs = childrenOfParents.map(c => pos[c.id].x);
+  const parentsMidX = (Math.min(...childrenXs) + Math.max(...childrenXs)) / 2;
+  if (fa) pos[fa.id] = { x: parentsMidX - 80, y: cy - GEN_Y };
+  if (mo) pos[mo.id] = { x: parentsMidX + 80, y: cy - GEN_Y };
+
+  // 조부 / 조모 (부의 부모)
+  const gfFa = people.find(p => p.relation === '조부');
+  const gmFa = people.find(p => p.relation === '조모');
+  const faX = fa ? pos[fa.id].x : parentsMidX - 80;
+  if (gfFa) pos[gfFa.id] = { x: faX - 80, y: cy - GEN_Y * 2 };
+  if (gmFa) pos[gmFa.id] = { x: faX + 80, y: cy - GEN_Y * 2 };
+
+  // 외조부 / 외조모 (모의 부모)
+  const gfMo = people.find(p => p.relation === '외조부');
+  const gmMo = people.find(p => p.relation === '외조모');
+  const moX = mo ? pos[mo.id].x : parentsMidX + 80;
+  if (gfMo) pos[gfMo.id] = { x: moX - 80, y: cy - GEN_Y * 2 };
+  if (gmMo) pos[gmMo.id] = { x: moX + 80, y: cy - GEN_Y * 2 };
+
+  // 자녀의 배우자 먼저 조회 (자녀 위치 계산에 사용)
+  const childSpouses = people.filter(p => p.relation === '자녀의배우자');
+  const childHasSpouse = (cid) => childSpouses.some(cs => String(cs.parentId) === String(cid));
+
+  // 자녀 (망인-배우자 아래) — 이전 자녀가 배우자 있으면 다음 자녀를 그 우측으로 이격
+  const children = people.filter(p => p.relation === '자녀');
+  const childMidX = spouse ? (cx + pos[spouse.id].x) / 2 : cx;
+  const childOffsets = [];
+  let cumChild = 0;
+  children.forEach((c, i) => {
+    if (i > 0) {
+      cumChild += HORI_X;
+      if (childHasSpouse(children[i - 1].id)) cumChild += HORI_X * 0.95;
+    }
+    childOffsets.push(cumChild);
+  });
+  const totalChildW = cumChild;
+  children.forEach((c, i) => {
+    pos[c.id] = { x: childMidX - totalChildW / 2 + childOffsets[i], y: cy + GEN_Y };
+  });
+
+  // 자녀의 배우자 (각 자녀 옆)
+  childSpouses.forEach(cs => {
+    const parentChild = people.find(p => String(p.id) === String(cs.parentId));
+    if (parentChild && pos[parentChild.id]) {
+      pos[cs.id] = { x: pos[parentChild.id].x + HORI_X * 0.95, y: pos[parentChild.id].y };
+    }
+  });
+
+  // 손자녀 (자녀 아래, parentId 기준)
+  const grandkids = people.filter(p => p.relation === '손자녀');
+  // 같은 부모의 손자녀끼리 묶기
+  const grandkidsByParent = {};
+  grandkids.forEach(g => {
+    const pid = String(g.parentId || '');
+    if (!grandkidsByParent[pid]) grandkidsByParent[pid] = [];
+    grandkidsByParent[pid].push(g);
+  });
+  Object.entries(grandkidsByParent).forEach(([pid, gs]) => {
+    const parent = people.find(p => String(p.id) === pid);
+    const baseX = parent && pos[parent.id] ? pos[parent.id].x : cx;
+    const SPACING = 140;  // 박스 너비 110 + 배지 좌우 튀어나옴 여유
+    gs.forEach((g, i) => {
+      const totalW = (gs.length - 1) * SPACING;
+      pos[g.id] = { x: baseX - totalW / 2 + i * SPACING, y: cy + GEN_Y * 2 };
+    });
+  });
+
+  // 조카의 배우자 먼저 조회 (조카 위치 계산에 사용)
+  const nephewSpouses = people.filter(p => p.relation === '조카의배우자');
+  const nephewHasSpouse = (nid) => nephewSpouses.some(x => String(x.parentId) === String(nid));
+
+  // 조카 (형제자매+배우자 가운데 아래) — 배우자 있는 조카 다음은 더 우측으로
+  const nephews = people.filter(p => p.relation === '조카');
+  const nephewsByParent = {};
+  nephews.forEach(n => {
+    const pid = String(n.parentId || '');
+    if (!nephewsByParent[pid]) nephewsByParent[pid] = [];
+    nephewsByParent[pid].push(n);
+  });
+  Object.entries(nephewsByParent).forEach(([pid, ns]) => {
+    const parent = people.find(p => String(p.id) === pid);
+    const ss = siblingSpouses.find(x => String(x.parentId) === pid);
+    const baseX = (parent && pos[parent.id])
+      ? (ss && pos[ss.id] ? (pos[parent.id].x + pos[ss.id].x) / 2 : pos[parent.id].x)
+      : (cx - HORI_X);
+    const SPACING = 140;
+    const nOffsets = [];
+    let cumN = 0;
+    ns.forEach((n, i) => {
+      if (i > 0) {
+        cumN += SPACING;
+        if (nephewHasSpouse(ns[i - 1].id)) cumN += HORI_X * 0.95;
+      }
+      nOffsets.push(cumN);
+    });
+    ns.forEach((n, i) => {
+      pos[n.id] = { x: baseX - cumN / 2 + nOffsets[i], y: cy + GEN_Y };
+    });
+  });
+
+  // (조카의 배우자는 위에서 선언됨)
+  nephewSpouses.forEach(ns => {
+    const parentNephew = people.find(p => String(p.id) === String(ns.parentId));
+    if (parentNephew && pos[parentNephew.id]) {
+      pos[ns.id] = { x: pos[parentNephew.id].x + HORI_X * 0.95, y: pos[parentNephew.id].y };
+    }
+  });
+
+  // 조카의 자녀 (종손) — 조카+배우자 가운데 아래
+  const grandnephews = people.filter(p => p.relation === '조카의자녀');
+  const grandnephewsByParent = {};
+  grandnephews.forEach(g => {
+    const pid = String(g.parentId || '');
+    if (!grandnephewsByParent[pid]) grandnephewsByParent[pid] = [];
+    grandnephewsByParent[pid].push(g);
+  });
+  Object.entries(grandnephewsByParent).forEach(([pid, gs]) => {
+    const parent = people.find(p => String(p.id) === pid);
+    const ns = nephewSpouses.find(x => String(x.parentId) === pid);
+    const baseX = (parent && pos[parent.id])
+      ? (ns && pos[ns.id] ? (pos[parent.id].x + pos[ns.id].x) / 2 : pos[parent.id].x)
+      : cx;
+    const SPACING = 140;
+    gs.forEach((g, i) => {
+      const totalW = (gs.length - 1) * SPACING;
+      pos[g.id] = { x: baseX - totalW / 2 + i * SPACING, y: cy + GEN_Y * 2 };
+    });
+  });
+
+  // 4촌 (형제자매 옆 더 외곽)
+  const cousins = people.filter(p => p.relation === '4촌');
+  cousins.forEach((c, i) => {
+    pos[c.id] = { x: cx - HORI_X * (siblings.length + 2 + i), y: cy };
+  });
+
+  // 기타 (망인 아래 멀리)
+  const others = people.filter(p => p.relation === '기타' && !pos[p.id]);
+  others.forEach((o, i) => {
+    pos[o.id] = { x: 80 + i * 130, y: cy + GEN_Y * 2 + 80 };
+  });
+
+  // === viewBox 자동 조정 (컴팩트 모드면 viewBox를 키워 비례 축소 효과) ===
+  const allPos = Object.values(pos);
+  if (allPos.length > 0) {
+    const minX = Math.min(...allPos.map(p => p.x)) - BOX_W;
+    const maxX = Math.max(...allPos.map(p => p.x)) + BOX_W;
+    const minY = Math.min(...allPos.map(p => p.y)) - BOX_H;
+    const maxY = Math.max(...allPos.map(p => p.y)) + BOX_H;
+    const W = Math.max(maxX - minX + 80, 900);
+    const H = Math.max(maxY - minY + 80, 600);
+    const factor = compactMode ? 1.5 : 1;
+    svg.setAttribute('viewBox', `${minX - 40} ${minY - 40} ${W * factor} ${H * factor}`);
+  }
+
+  // === 상속인 자격 계산 (강조용) — 토글 OFF 시 비움 ===
+  const heirResult = autoHeirEnabled ? calculateHeirs() : null;
+  const heirIds = heirResult ? heirResult.heirIds : new Set();
+
+  // === 선 그리기 ===
+  // 배우자선
+  if (spouse) drawMarriageLine(svg, pos[deceased.id], pos[spouse.id]);
+  // 자녀의 배우자 — 자녀와 결혼선
+  childSpouses.forEach(cs => {
+    const parentChild = people.find(p => String(p.id) === String(cs.parentId));
+    if (parentChild && pos[parentChild.id] && pos[cs.id]) {
+      drawMarriageLine(svg, pos[parentChild.id], pos[cs.id]);
+    }
+  });
+
+  // 부모-자녀 선 (망인 + 형제자매)
+  // 부+모 모두 있으면 결혼선 가운데(박스 중심 y)에서 출발 — 박스 사이 공간이라 안 가려짐
+  // 단독이면 박스 하단에서 출발
+  if (fa || mo) {
+    const pMidPt = {
+      x: fa && mo ? (pos[fa.id].x + pos[mo.id].x) / 2 : (fa ? pos[fa.id].x : pos[mo.id].x),
+      y: (fa && mo) ? (fa ? pos[fa.id].y : pos[mo.id].y) : ((fa ? pos[fa.id].y : pos[mo.id].y) + BOX_H / 2)
+    };
+    // 부모 가운데 점 + 가로선
+    [deceased, ...siblings].forEach(child => {
+      if (child && pos[child.id]) drawParentChildLine(svg, pMidPt, pos[child.id]);
+    });
+    // 부-모 사이 결혼선
+    if (fa && mo) drawMarriageLine(svg, pos[fa.id], pos[mo.id]);
+  }
+
+  // 조부 - 부 (가족선)
+  if ((gfFa || gmFa) && fa) {
+    const gpMidPt = {
+      x: gfFa && gmFa ? (pos[gfFa.id].x + pos[gmFa.id].x) / 2 : (gfFa ? pos[gfFa.id].x : pos[gmFa.id].x),
+      y: (gfFa && gmFa) ? (gfFa ? pos[gfFa.id].y : pos[gmFa.id].y) : ((gfFa ? pos[gfFa.id].y : pos[gmFa.id].y) + BOX_H / 2)
+    };
+    drawParentChildLine(svg, gpMidPt, pos[fa.id]);
+    if (gfFa && gmFa) drawMarriageLine(svg, pos[gfFa.id], pos[gmFa.id]);
+  }
+  // 외조부 - 모
+  if ((gfMo || gmMo) && mo) {
+    const gpMidPt = {
+      x: gfMo && gmMo ? (pos[gfMo.id].x + pos[gmMo.id].x) / 2 : (gfMo ? pos[gfMo.id].x : pos[gmMo.id].x),
+      y: (gfMo && gmMo) ? (gfMo ? pos[gfMo.id].y : pos[gmMo.id].y) : ((gfMo ? pos[gfMo.id].y : pos[gmMo.id].y) + BOX_H / 2)
+    };
+    drawParentChildLine(svg, gpMidPt, pos[mo.id]);
+    if (gfMo && gmMo) drawMarriageLine(svg, pos[gfMo.id], pos[gmMo.id]);
+  }
+
+  // 망인-배우자 → 자녀 선
+  // 부부면 결혼선 가운데(박스 중심 y)에서 출발 — 박스 사이라 안 가려짐
+  if (children.length > 0) {
+    const midPt = spouse
+      ? { x: (pos[deceased.id].x + pos[spouse.id].x) / 2, y: pos[deceased.id].y }
+      : { x: pos[deceased.id].x, y: pos[deceased.id].y + BOX_H / 2 };
+    children.forEach(c => drawParentChildLine(svg, midPt, pos[c.id]));
+  }
+
+  // 자녀(또는 자녀+배우자) → 손자녀
+  Object.entries(grandkidsByParent).forEach(([pid, gs]) => {
+    const parent = people.find(p => String(p.id) === pid);
+    if (!parent || !pos[parent.id]) return;
+    // 자녀의 배우자가 있으면 둘 사이 가운데(박스 중심 y), 없으면 박스 하단
+    const cs = childSpouses.find(x => String(x.parentId) === pid);
+    const midPt = cs && pos[cs.id]
+      ? { x: (pos[parent.id].x + pos[cs.id].x) / 2, y: pos[parent.id].y }
+      : { x: pos[parent.id].x, y: pos[parent.id].y + BOX_H / 2 };
+    gs.forEach(g => drawParentChildLine(svg, midPt, pos[g.id]));
+  });
+
+  // 형제자매-배우자 결혼선
+  siblingSpouses.forEach(ss => {
+    const parentSib = people.find(p => String(p.id) === String(ss.parentId));
+    if (parentSib && pos[parentSib.id] && pos[ss.id]) {
+      drawMarriageLine(svg, pos[parentSib.id], pos[ss.id]);
+    }
+  });
+
+  // 조카-배우자 결혼선
+  nephewSpouses.forEach(ns => {
+    const parentNephew = people.find(p => String(p.id) === String(ns.parentId));
+    if (parentNephew && pos[parentNephew.id] && pos[ns.id]) {
+      drawMarriageLine(svg, pos[parentNephew.id], pos[ns.id]);
+    }
+  });
+
+  // 형제자매(+배우자) → 조카
+  Object.entries(nephewsByParent).forEach(([pid, ns]) => {
+    const parent = people.find(p => String(p.id) === pid);
+    if (!parent || !pos[parent.id]) return;
+    const ss = siblingSpouses.find(x => String(x.parentId) === pid);
+    const midPt = ss && pos[ss.id]
+      ? { x: (pos[parent.id].x + pos[ss.id].x) / 2, y: pos[parent.id].y }
+      : { x: pos[parent.id].x, y: pos[parent.id].y + BOX_H / 2 };
+    ns.forEach(n => drawParentChildLine(svg, midPt, pos[n.id]));
+  });
+
+  // 조카(+배우자) → 조카의자녀 (종손)
+  Object.entries(grandnephewsByParent).forEach(([pid, gs]) => {
+    const parent = people.find(p => String(p.id) === pid);
+    if (!parent || !pos[parent.id]) return;
+    const ns = nephewSpouses.find(x => String(x.parentId) === pid);
+    const midPt = ns && pos[ns.id]
+      ? { x: (pos[parent.id].x + pos[ns.id].x) / 2, y: pos[parent.id].y }
+      : { x: pos[parent.id].x, y: pos[parent.id].y + BOX_H / 2 };
+    gs.forEach(g => drawParentChildLine(svg, midPt, pos[g.id]));
+  });
+
+  // === 박스 그리기 ===
+  people.forEach(p => {
+    if (!pos[p.id]) return;
+    drawPersonBox(svg, p, pos[p.id], heirIds.has(p.id));
+  });
+}
+
+// 결혼선 (가로 직선)
+function drawMarriageLine(svg, p1, p2) {
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', p1.x);
+  line.setAttribute('y1', p1.y);
+  line.setAttribute('x2', p2.x);
+  line.setAttribute('y2', p2.y);
+  line.setAttribute('class', 'marriage-line');
+  svg.appendChild(line);
+}
+
+// 부모-자녀선 (수직 + 수평)
+function drawParentChildLine(svg, parentPt, childPos) {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const cx = childPos.x;
+  const cy = childPos.y - BOX_H / 2;
+  const midY = (parentPt.y + cy) / 2;
+  const d = `M ${parentPt.x} ${parentPt.y} L ${parentPt.x} ${midY} L ${cx} ${midY} L ${cx} ${cy}`;
+  path.setAttribute('d', d);
+  path.setAttribute('class', 'parent-line');
+  svg.appendChild(path);
+}
+
+// 박스
+function drawPersonBox(svg, p, position, isHeir) {
+  const { x, y } = position;
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('class', 'person-box');
+  g.setAttribute('transform', `translate(${x - BOX_W / 2}, ${y - BOX_H / 2})`);
+
+  // 색상 결정 (사망은 가족 일반보다 명확히 어두운 회색 + 진한 테두리)
+  let fill = '#f1f5f9', stroke = '#94a3b8', strokeWidth = 1.5;
+  if (p.relation === '망인') { fill = '#fee2e2'; stroke = '#dc2626'; strokeWidth = 2.5; }
+  else if (isHeir) { fill = '#fef3c7'; stroke = '#d97706'; strokeWidth = 2.5; }
+  else if (p.status === 'deceased') { fill = '#cbd5e1'; stroke = '#475569'; strokeWidth = 2; }
+  else if (p.status === 'renounce') { fill = '#fce7f3'; stroke = '#be185d'; }
+  else if (p.status === 'limited') { fill = '#d1fae5'; stroke = '#059669'; }
+
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('width', BOX_W);
+  rect.setAttribute('height', BOX_H);
+  rect.setAttribute('rx', 6); // 모양 통일 (성별 시각화 제거)
+  rect.setAttribute('fill', fill);
+  rect.setAttribute('stroke', stroke);
+  rect.setAttribute('stroke-width', strokeWidth);
+  if (isHeir) rect.setAttribute('filter', 'drop-shadow(0 0 4px rgba(217, 119, 6, 0.6))');
+  g.appendChild(rect);
+
+  // 청구인/청구외 라벨 (옵션, 박스 최상단)
+  const yOffset = useClaimLabel ? 4 : 0;
+  if (useClaimLabel) {
+    const claimText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    claimText.setAttribute('x', BOX_W / 2);
+    claimText.setAttribute('y', 12);
+    claimText.setAttribute('text-anchor', 'middle');
+    claimText.setAttribute('font-size', '9');
+    claimText.setAttribute('font-weight', '600');
+    claimText.setAttribute('fill', '#64748b');
+    claimText.textContent = getClaimLabel(p);
+    g.appendChild(claimText);
+  }
+
+  // 이름
+  const nameText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  nameText.setAttribute('x', BOX_W / 2);
+  nameText.setAttribute('y', 22 + yOffset);
+  nameText.setAttribute('text-anchor', 'middle');
+  nameText.setAttribute('font-size', '13');
+  nameText.setAttribute('font-weight', '600');
+  nameText.setAttribute('fill', '#0f172a');
+  nameText.textContent = p.name || `(${p.relation})`;
+  g.appendChild(nameText);
+
+  // 관계
+  const relText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  relText.setAttribute('x', BOX_W / 2);
+  relText.setAttribute('y', 36 + yOffset);
+  relText.setAttribute('text-anchor', 'middle');
+  relText.setAttribute('font-size', '10');
+  relText.setAttribute('fill', '#475569');
+  relText.textContent = p.relation === '망인' ? '망인 ✝' : p.relation;
+  g.appendChild(relText);
+
+  // 출생/사망 정보
+  if (p.birthYear || p.deathDate) {
+    const dateText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    dateText.setAttribute('x', BOX_W / 2);
+    dateText.setAttribute('y', 49 + yOffset);
+    dateText.setAttribute('text-anchor', 'middle');
+    dateText.setAttribute('font-size', '9');
+    dateText.setAttribute('fill', '#64748b');
+    const by = p.birthYear ? p.birthYear : '';
+    const dy = p.deathDate ? p.deathDate.slice(0, 7) : '';
+    dateText.textContent = by && dy ? `${by} ~ ${dy}` : (by ? `${by}~` : (dy ? `~${dy}` : ''));
+    g.appendChild(dateText);
+  }
+
+  // 상태 배지 (한정/상포) — 두 글자 캡슐, 박스 우상단 모서리에 살짝 걸침 (충돌 방지)
+  if (p.status === 'limited' || p.status === 'renounce') {
+    const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const badgeW = 30, badgeH = 14;
+    const badgeX = BOX_W - badgeW + 6;   // 우측 6px만 튀어나옴 (다음 박스와 안전 거리)
+    const badgeY = -4;                    // 위쪽 4px 튀어나옴
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('x', badgeX);
+    bg.setAttribute('y', badgeY);
+    bg.setAttribute('width', badgeW);
+    bg.setAttribute('height', badgeH);
+    bg.setAttribute('rx', badgeH / 2);  // 캡슐 모양
+    bg.setAttribute('fill', p.status === 'limited' ? '#059669' : '#be185d');
+    badge.appendChild(bg);
+    const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txt.setAttribute('x', badgeX + badgeW / 2);
+    txt.setAttribute('y', badgeY + 11);
+    txt.setAttribute('text-anchor', 'middle');
+    txt.setAttribute('font-size', '10');
+    txt.setAttribute('font-weight', 'bold');
+    txt.setAttribute('fill', 'white');
+    txt.textContent = p.status === 'limited' ? '한정' : '상포';
+    badge.appendChild(txt);
+    g.appendChild(badge);
+  }
+
+  // 좌상단 배지 (망인 ✝ / 상속인 ★ / 사망 故 — 셋 중 하나)
+  let leftBadge = null;
+  if (p.relation === '망인') leftBadge = { fill: '#dc2626', text: '✝', fontSize: 11 };
+  else if (isHeir) leftBadge = { fill: '#f59e0b', text: '★', fontSize: 11 };
+  else if (p.status === 'deceased') leftBadge = { fill: '#475569', text: '故', fontSize: 10 };
+  if (leftBadge) {
+    const dbadge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const dx = 7, dy = 6;  // 박스 좌상단 모서리에 살짝 걸침 (좌 3px, 위 4px 튀어나옴) — 충돌 방지
+    const cir = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    cir.setAttribute('cx', dx);
+    cir.setAttribute('cy', dy);
+    cir.setAttribute('r', 10);
+    cir.setAttribute('fill', leftBadge.fill);
+    dbadge.appendChild(cir);
+    const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txt.setAttribute('x', dx);
+    txt.setAttribute('y', dy + 4);
+    txt.setAttribute('text-anchor', 'middle');
+    txt.setAttribute('font-size', leftBadge.fontSize);
+    txt.setAttribute('fill', 'white');
+    txt.setAttribute('font-weight', 'bold');
+    txt.textContent = leftBadge.text;
+    dbadge.appendChild(txt);
+    g.appendChild(dbadge);
+  }
+
+  svg.appendChild(g);
+}
+
+// 줌
+function zoomTree(factor) {
+  const svg = document.getElementById('familySvg');
+  const wrap = document.getElementById('svgWrap');
+  if (factor === 0) {
+    zoomLevel = 1;
+    svg.style.transform = '';
+    svg.style.transformOrigin = '';
+    svg.style.width = '100%';
+    return;
+  }
+  zoomLevel *= factor;
+  zoomLevel = Math.max(0.4, Math.min(zoomLevel, 3));
+  svg.style.width = `${100 * zoomLevel}%`;
+}
+
+// ============================================================
+// PNG / JSON 입출력
+// ============================================================
+function downloadPNG() {
+  const svg = document.getElementById('familySvg');
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  // 인라인 스타일 강제
+  clone.querySelectorAll('.marriage-line').forEach(el => {
+    el.setAttribute('stroke', '#475569');
+    el.setAttribute('stroke-width', '2');
+  });
+  clone.querySelectorAll('.parent-line').forEach(el => {
+    el.setAttribute('stroke', '#94a3b8');
+    el.setAttribute('stroke-width', '1.5');
+    el.setAttribute('fill', 'none');
+  });
+  const svgData = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+  const img = new Image();
+  img.onload = function() {
+    const vb = svg.getAttribute('viewBox').split(' ').map(Number);
+    const w = vb[2], h = vb[3];
+    const scale = 2; // 고해상도
+    const canvas = document.createElement('canvas');
+    canvas.width = w * scale;
+    canvas.height = h * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    const link = document.createElement('a');
+    const deceased = people.find(p => p.relation === '망인');
+    const fn = `가계도_${deceased?.name || '미지정'}_${new Date().toISOString().slice(0, 10)}.png`;
+    link.download = fn;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  };
+  img.onerror = () => alert('PNG 변환 실패. 다시 시도해주세요.');
+  img.src = url;
+}
+
+function exportJSON() {
+  const data = { people, nextId, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const deceased = people.find(p => p.relation === '망인');
+  link.download = `가계도_${deceased?.name || 'untitled'}_${new Date().toISOString().slice(0, 10)}.json`;
+  link.href = url;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function importJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data.people)) throw new Error('형식 오류');
+      people = data.people;
+      nextId = data.nextId || (people.length + 1);
+      save();
+      render();
+    } catch(err) {
+      alert('JSON 파일 형식이 올바르지 않습니다: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+// ============================================================
+// 샘플 데이터
+// ============================================================
+function loadSample(type) {
+  if (!confirm('샘플 데이터로 덮어쓰시겠습니까? (현재 내용이 사라집니다)')) return;
+  people = [];
+  nextId = 1;
+
+  if (type === 'lineal') {
+    // 직계비속 기본: 망인 + 배우자 + 자녀 2
+    people.push(newPerson({ name: '김아버지', relation: '망인', gender: 'M', birthYear: '1950', deathDate: '2024-03-15', status: 'deceased' }));
+    people.push(newPerson({ name: '박어머니', relation: '배우자', gender: 'F', birthYear: '1953', status: 'alive' }));
+    people.push(newPerson({ name: '김큰아들', relation: '자녀', gender: 'M', birthYear: '1980', status: 'limited' }));
+    people.push(newPerson({ name: '김작은딸', relation: '자녀', gender: 'F', birthYear: '1985', status: 'renounce' }));
+  } else if (type === 'substitute') {
+    // 대습상속: 자녀 중 1명 사망 → 손자녀 등장
+    people.push(newPerson({ name: '이망인', relation: '망인', gender: 'M', birthYear: '1945', deathDate: '2025-01-10', status: 'deceased' }));
+    people.push(newPerson({ name: '최배우자', relation: '배우자', gender: 'F', birthYear: '1948', status: 'alive' }));
+    const c1 = newPerson({ name: '이큰아들', relation: '자녀', gender: 'M', birthYear: '1972', deathDate: '2020-05-01', status: 'deceased' });
+    people.push(c1);
+    people.push(newPerson({ name: '이둘째딸', relation: '자녀', gender: 'F', birthYear: '1975', status: 'limited' }));
+    people.push(newPerson({ name: '이손녀', relation: '손자녀', parentId: c1.id, gender: 'F', birthYear: '2002', status: 'alive' }));
+    people.push(newPerson({ name: '이손자', relation: '손자녀', parentId: c1.id, gender: 'M', birthYear: '2005', status: 'limited' }));
+  } else if (type === 'sibling') {
+    // 형제자매 상속: 직계비속·존속·배우자 전부 없거나 포기
+    people.push(newPerson({ name: '박망인', relation: '망인', gender: 'M', birthYear: '1960', deathDate: '2025-02-20', status: 'deceased' }));
+    people.push(newPerson({ name: '박부친', relation: '부', gender: 'M', birthYear: '1935', deathDate: '2015-08-01', status: 'deceased' }));
+    people.push(newPerson({ name: '박모친', relation: '모', gender: 'F', birthYear: '1937', deathDate: '2018-11-12', status: 'deceased' }));
+    people.push(newPerson({ name: '박형', relation: '형제자매', gender: 'M', birthYear: '1957', status: 'limited' }));
+    people.push(newPerson({ name: '박누나', relation: '형제자매', gender: 'F', birthYear: '1955', status: 'alive' }));
+    const sib = newPerson({ name: '박남동생', relation: '형제자매', gender: 'M', birthYear: '1962', deathDate: '2022-06-01', status: 'deceased' });
+    people.push(sib);
+    people.push(newPerson({ name: '박조카1', relation: '조카', parentId: sib.id, gender: 'M', birthYear: '1990', status: 'alive' }));
+  }
+  save();
+  render();
+}
+
+// ============================================================
+// 전체 렌더
+// ============================================================
+function render() {
+  renderTable();
+  renderHeirSummary();
+  renderTree();
+}
+
+// ============================================================
+// 초기화
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+  load();
+  const toggleAuto = document.getElementById('autoHeirToggle');
+  if (toggleAuto) toggleAuto.checked = autoHeirEnabled;
+  const toggleClaim = document.getElementById('claimLabelToggle');
+  if (toggleClaim) toggleClaim.checked = useClaimLabel;
+  const toggleComp = document.getElementById('compactToggle');
+  if (toggleComp) toggleComp.checked = compactMode;
+  render();
+});
+</script>
+
+</body>
+</html>
