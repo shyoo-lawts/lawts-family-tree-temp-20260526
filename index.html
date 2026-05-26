@@ -157,12 +157,26 @@
   tbody tr:hover { background: #f8fafc; }
   thead th { font-family: 'Outfit', 'Noto Sans KR', sans-serif; color: var(--text-muted); font-weight: 600; letter-spacing: 0.02em; }
 
-  /* 인쇄 */
+  /* 인쇄 — SVG 영역 잘림 방지 + 한 페이지 비례 축소 */
   @media print {
     .no-print { display: none !important; }
     .print-area { width: 100% !important; max-width: none !important; }
     body { background: white !important; }
-    .ds-card { box-shadow: none !important; border: 1px solid #e2e8f0; }
+    .ds-card { box-shadow: none !important; border: 1px solid #e2e8f0; page-break-inside: avoid; }
+    /* SVG 컨테이너 스크롤·max-height 해제 — 가계도 전체 출력 */
+    #svgWrap {
+      max-height: none !important;
+      overflow: visible !important;
+      border: none !important;
+      background: white !important;
+    }
+    /* SVG 자체 한 페이지 안에 비례 축소 (A4 landscape: 297×210mm, margin 10mm 빼고 약 277×190mm) */
+    #familySvg {
+      width: 100% !important;
+      max-width: 270mm !important;
+      height: auto !important;
+      max-height: 170mm !important;
+    }
     @page { size: A4 landscape; margin: 10mm; }
   }
 
@@ -326,7 +340,7 @@ const RELATIONS = [
   '망인','배우자',
   '자녀','자녀의배우자','손자녀',
   '부','모','조부','조모','외조부','외조모',
-  '형제자매','형제자매의배우자','조카','조카의배우자','조카의자녀','4촌',
+  '형제자매','형제자매의배우자','조카','조카의배우자','질손','4촌',
   '기타'
 ];
 
@@ -384,6 +398,33 @@ function getClaimLabel(p) {
   if (p.status === 'limited' || p.status === 'renounce') return '청구인';
   if (p.status === 'deceased') return '청구외 망';
   return '청구외';
+}
+
+// 실무 표기용 풀네임 관계 라벨 ("피상속인의 ...")
+const FULL_REL_LABEL = {
+  '망인': '망인 ✝',
+  '배우자': '피상속인의 배우자',
+  '자녀': '피상속인의 자녀',
+  '자녀의배우자': '자녀의 배우자',
+  '손자녀': '피상속인의 손자녀',
+  '부': '피상속인의 부',
+  '모': '피상속인의 모',
+  '조부': '피상속인의 조부',
+  '조모': '피상속인의 조모',
+  '외조부': '피상속인의 외조부',
+  '외조모': '피상속인의 외조모',
+  '형제자매': '피상속인의 형제',
+  '형제자매의배우자': '형제의 배우자',
+  '조카': '피상속인의 조카',
+  '조카의배우자': '조카의 배우자',
+  '질손': '피상속인의 질손',
+  '4촌': '피상속인의 4촌',
+  '기타': '기타'
+};
+
+function getRelLabel(p) {
+  if (p.relation === '망인') return '망인 ✝';
+  return useClaimLabel ? (FULL_REL_LABEL[p.relation] || p.relation) : p.relation;
 }
 
 function newPerson(overrides = {}) {
@@ -449,7 +490,7 @@ function renderTable() {
     return;
   }
   // 부모 지정이 필요한 관계만
-  const needsParent = (rel) => ['손자녀','조카','자녀의배우자','형제자매의배우자','조카의배우자','조카의자녀'].includes(rel);
+  const needsParent = (rel) => ['손자녀','조카','자녀의배우자','형제자매의배우자','조카의배우자','질손'].includes(rel);
 
   tbody.innerHTML = people.map((p, i) => {
     const stRow = STATUSES.find(s => s.value === p.status) || STATUSES[0];
@@ -586,7 +627,7 @@ function calculateHeirs() {
     };
   }
 
-  // ④ 3순위: 형제자매 + 다단계 대습 (조카, 조카의자녀)
+  // ④ 3순위: 형제자매 + 다단계 대습 (조카, 질손)
   const allSiblings = people.filter(p => p.relation === '형제자매');
   const order3 = [];
   allSiblings.forEach(s => {
@@ -601,7 +642,7 @@ function calculateHeirs() {
         if (n.status === 'deceased') {
           // 2단계 대습: 조카의 자녀(종손)
           const grandnephews = people.filter(p =>
-            p.relation === '조카의자녀' && String(p.parentId) === String(n.id) && p.status !== 'renounce'
+            p.relation === '질손' && String(p.parentId) === String(n.id) && p.status !== 'renounce'
           );
           grandnephews.forEach(g => order3.push({
             ...g, _substitute: true,
@@ -880,7 +921,7 @@ function renderTree() {
   });
 
   // 조카의 자녀 (종손) — 조카+배우자 가운데 아래
-  const grandnephews = people.filter(p => p.relation === '조카의자녀');
+  const grandnephews = people.filter(p => p.relation === '질손');
   const grandnephewsByParent = {};
   grandnephews.forEach(g => {
     const pid = String(g.parentId || '');
@@ -1023,7 +1064,7 @@ function renderTree() {
     ns.forEach(n => drawParentChildLine(svg, midPt, pos[n.id]));
   });
 
-  // 조카(+배우자) → 조카의자녀 (종손)
+  // 조카(+배우자) → 질손 (종손)
   Object.entries(grandnephewsByParent).forEach(([pid, gs]) => {
     const parent = people.find(p => String(p.id) === pid);
     if (!parent || !pos[parent.id]) return;
@@ -1114,14 +1155,14 @@ function drawPersonBox(svg, p, position, isHeir) {
   nameText.textContent = p.name || `(${p.relation})`;
   g.appendChild(nameText);
 
-  // 관계
+  // 관계 (실무 표기 ON 시 "피상속인의 ..." 풀네임)
   const relText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
   relText.setAttribute('x', BOX_W / 2);
   relText.setAttribute('y', 36 + yOffset);
   relText.setAttribute('text-anchor', 'middle');
-  relText.setAttribute('font-size', '10');
+  relText.setAttribute('font-size', useClaimLabel ? '9' : '10');
   relText.setAttribute('fill', '#475569');
-  relText.textContent = p.relation === '망인' ? '망인 ✝' : p.relation;
+  relText.textContent = getRelLabel(p);
   g.appendChild(relText);
 
   // 출생/사망 정보
