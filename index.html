@@ -271,9 +271,9 @@
   <section class="col-span-12 lg:col-span-7 print-area">
     <!-- 상속인 요약 -->
     <div class="ds-card p-4 mb-4">
-      <h2 class="page-h2 mb-2 flex items-center gap-2">
-        ⚖ 상속인 자동 분석
-        <span class="notice">변호사 검증 필수</span>
+      <h2 class="page-h2 mb-1 flex items-center gap-2">
+        ⚖ 법정상속인 자동분석
+        <span class="notice">참고용 · 변호사 검증 필수</span>
         <label class="ml-auto flex items-center gap-1.5 text-xs cursor-pointer select-none font-normal">
           <input type="checkbox" id="claimLabelToggle" onchange="toggleClaimLabel(this.checked)" class="w-4 h-4 accent-slate-600">
           <span title="박스에 '피상속인 망 / 청구인 / 청구외 망 / 청구외' 라벨 표시">실무 표기</span>
@@ -283,6 +283,7 @@
           <span>자동 판정</span>
         </label>
       </h2>
+      <p class="text-[11px] text-slate-400 mb-2 leading-snug">★ = 현재 상속받을 <b>법정상속인</b>(민법 순위). <b class="text-rose-500">청구인(신청자)과 다릅니다</b> — 상속포기한 청구인은 ★가 아닙니다. 청구인은 박스의 분홍/녹색 배지로 표시됩니다.</p>
       <div id="heirSummary" class="text-sm text-slate-700 space-y-1.5"></div>
     </div>
 
@@ -628,12 +629,18 @@ function calculateHeirs() {
     };
   }
 
-  // ④ 3순위: 형제자매 + 다단계 대습 (조카, 질손)
+  // ④ 3순위: 형제자매 + 다단계 대습 (조카, 질손, 형제의 배우자)
+  // 민법 1003조 ②: 대습상속 시 사망한 형제의 배우자도 함께 대습상속인
   const allSiblings = people.filter(p => p.relation === '형제자매');
   const order3 = [];
   allSiblings.forEach(s => {
     if (s.status === 'renounce') return;  // 포기 = 제외
     if (s.status === 'deceased') {
+      // 형제의 배우자도 대습상속인 (민법 1003조 ②) — 포기 안 했으면 포함
+      const spouseOfS = people.find(p =>
+        p.relation === '형제자매의배우자' && String(p.parentId) === String(s.id) && p.status !== 'renounce' && p.status !== 'deceased'
+      );
+      if (spouseOfS) order3.push({...spouseOfS, _substitute: true, _substituteFrom: s.name || `형제#${s.id}`});
       // 1단계 대습: 형제자매의 자녀(조카)
       const nephewsOfS = people.filter(p =>
         p.relation === '조카' && String(p.parentId) === String(s.id)
@@ -699,7 +706,7 @@ function renderHeirSummary() {
     return;
   }
   if (!autoHeirEnabled) {
-    el.innerHTML = '<p class="text-slate-500">⏸ <b>자동 판정 OFF</b> — 가계도의 ★ 상속인 표시도 끔. 변호사가 직접 검토하세요.</p>';
+    el.innerHTML = '<p class="text-slate-500">⏸ <b>자동 판정 OFF</b> — ★(법정상속인) 강조만 끕니다. <b>청구인 표시(분홍·녹색 배지)는 그대로 유지</b>되니, 실무 표기를 켜면 가계도에서 청구인을 계속 볼 수 있습니다.</p>';
     return;
   }
   const result = calculateHeirs();
@@ -738,16 +745,34 @@ function renderHeirSummary() {
   const renouncedCount = people.filter(p => p.status === 'renounce').length;
   const limitedCount = people.filter(p => p.status === 'limited').length;
 
+  // 청구인(한정승인·상속포기 신청자) — 자동판정 상속인(★)과 별개 개념
+  const claimants = people.filter(p => p.status === 'limited' || p.status === 'renounce');
+  const claimantNames = claimants.length === 0
+    ? '<span class="text-slate-400">(없음)</span>'
+    : claimants.map(c => {
+        const color = c.status === 'limited' ? 'bg-emerald-50 border-emerald-300' : 'bg-rose-50 border-rose-300';
+        const badge = c.status === 'limited' ? '한정' : '상포';
+        const bcolor = c.status === 'limited' ? 'bg-emerald-600' : 'bg-rose-600';
+        return `<span class="inline-block ${color} border px-2 py-0.5 rounded mx-0.5 my-0.5">${c.name || '(무명)'}<span class="ml-1 text-[10px] ${bcolor} text-white px-1.5 py-px rounded-full font-bold">${badge}</span></span>`;
+      }).join('');
+
+  // 청구인은 있는데 ★(법정상속인) 없는 케이스 = 가장 흔한 혼동 → 안내
+  const noHeirNotice = (result.order === -1 && claimants.length > 0)
+    ? `<div class="bg-blue-50 border border-blue-300 text-blue-800 text-xs px-2 py-1.5 rounded mb-2 leading-snug">ℹ️ <b>청구인은 ${claimants.length}명이지만 ★(법정상속인)은 없습니다.</b> 상속포기한 청구인은 상속인 자격을 버리므로 ★로 표시되지 않습니다 (정상 동작). 다음 순위·특별연고자·국가귀속 검토가 필요할 수 있습니다.</div>`
+    : '';
+
   el.innerHTML = `
     ${multipleWarning}
     ${substitutionWarning}
+    ${noHeirNotice}
     <div class="flex items-center gap-2 flex-wrap">
       ${orderBadge}
       <b>${result.label}</b>
     </div>
-    <div class="mt-2">현 상속인: ${heirNames}</div>
+    <div class="mt-2">★ 현 법정상속인: ${heirNames}</div>
+    <div class="mt-1.5 pt-1.5 border-t border-slate-100">📋 청구인(신청자): ${claimantNames}</div>
     <p class="text-xs text-slate-500 mt-1">📐 ${result.note}</p>
-    ${result.hasSubstitute ? '<p class="text-xs text-purple-700 mt-1">🔁 대습상속 발생 (자녀 사망 → 손자녀가 대신 상속)</p>' : ''}
+    ${result.hasSubstitute ? '<p class="text-xs text-purple-700 mt-1">🔁 대습상속 발생 (선순위 사망 → 그 직계·배우자가 대신 상속)</p>' : ''}
     <div class="text-xs text-slate-500 mt-2 flex gap-4">
       <span>📊 입력 인원 ${people.length}명</span>
       <span>한정승인 ${limitedCount}명</span>
