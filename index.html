@@ -35,6 +35,8 @@
   .cell:focus { @apply outline-none ring-2; ring-color: var(--accent); border-color: var(--accent); }
   /* 표 컬럼 너비 강제 */
   table.fixed-cols { table-layout: fixed; }
+  /* 셀 사이 가는 세로 구분선 — 관계·부모 등 컬럼이 붙어 보이는 문제 방지 */
+  table.fixed-cols td:not(:last-child) { border-right: 1px solid #eef2f7; }
 
   /* 가계도 박스 — translateY 안 씀 (박스가 떠오르면 마우스가 빠져 hover 무한 반복됨) */
   .person-box { cursor: pointer; transition: filter 0.15s; }
