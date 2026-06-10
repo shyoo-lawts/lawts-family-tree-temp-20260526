@@ -812,13 +812,22 @@ function renderTree() {
 
   // 형제자매 (망인 좌측, 여러 명이면 좌로 펼침)
   // 배우자 있는 형제는 본인 위치 후 다음 형제를 위해 배우자 폭만큼 추가 이격
+  // ⚠️ 형제의 조카가 좌우로 펼쳐지면 망인의 자녀와 가로로 겹치므로,
+  //    ① 자녀 그룹이 차지하는 좌측 폭 ② 각 형제의 조카 펼침 폭 을 반영해 형제를 더 좌측으로 민다.
   const siblings = people.filter(p => p.relation === '형제자매');
   const siblingSpouses = people.filter(p => p.relation === '형제자매의배우자');
   const sibHasSpouse = (sid) => siblingSpouses.some(ss => String(ss.parentId) === String(sid));
-  let xOffset = 0;
+  // 망인 자녀 그룹이 중심에서 좌측으로 차지하는 폭 (형제 시작점을 그만큼 밀어 겹침 방지)
+  const childCnt = people.filter(p => p.relation === '자녀').length;
+  const childGroupHalf = childCnt > 0 ? ((childCnt - 1) * HORI_X) / 2 + 70 : 0;
+  const nephewCntOf = (sid) => people.filter(p => p.relation === '조카' && String(p.parentId) === String(sid)).length;
+  let xOffset = childGroupHalf;
   siblings.forEach((s, i) => {
-    xOffset += HORI_X;
+    const nCnt = nephewCntOf(s.id);
+    const subHalf = nCnt > 1 ? ((nCnt - 1) * 140) / 2 : 0;  // 이 형제 조카가 좌우로 펼쳐지는 폭의 절반
+    xOffset += HORI_X + subHalf;       // 조카 우측 폭만큼 형제를 더 좌측에 배치
     pos[s.id] = { x: cx - xOffset, y: cy };
+    xOffset += subHalf;                // 조카 좌측 폭만큼 다음 형제를 더 좌측으로
     // 배우자가 좌측에 들어가므로 다음 형제는 배우자 폭만큼 더 좌측으로
     if (sibHasSpouse(s.id)) {
       xOffset += HORI_X * 0.95;
