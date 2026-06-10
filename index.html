@@ -613,7 +613,7 @@ function renderTable() {
 
     // 부모 셀: 필요한 관계만 드롭다운, 나머지는 회색 "-"
     const parentCell = needsParent(p.relation)
-      ? `<select class="cell" onchange="updateField(${p.id}, 'parentId', this.value)" title="부모 선택">
+      ? `<select class="cell" style="background:#eef2f7" onchange="updateField(${p.id}, 'parentId', this.value)" title="부모 선택">
            <option value="">- 선택 -</option>
            ${people.filter(x => x.id !== p.id).map(x =>
              `<option value="${x.id}" ${String(p.parentId||'')===String(x.id)?'selected':''}>${escapeAttr(x.name) || `#${x.id}`}</option>`
