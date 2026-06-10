@@ -228,7 +228,10 @@
     <div class="ds-card p-4">
       <div class="flex items-center justify-between mb-3">
         <h2 class="page-h2">인적사항 입력</h2>
-        <button onclick="addPerson()" class="btn-navy text-xs px-3 py-1.5">＋ 행 추가</button>
+        <div class="flex gap-1.5">
+          <button onclick="toggleSelectMode()" id="selectModeBtn" class="text-xs px-3 py-1.5 rounded-lg font-medium" style="background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;">☑ 선택 적용</button>
+          <button onclick="addPerson()" class="btn-navy text-xs px-3 py-1.5">＋ 행 추가</button>
+        </div>
       </div>
 
       <!-- 도움말 토글 -->
@@ -243,6 +246,24 @@
           <p class="text-amber-700"><b>⚠️ 한정승인</b>은 상속인 자격 유지(책임만 한도내 제한). <b>상속포기</b>만 상속인에서 제외됨.</p>
         </div>
       </details>
+
+      <!-- 상태 일괄 적용 컨트롤 바 (선택 모드일 때만 표시) -->
+      <div id="bulkBar" class="hidden items-center gap-2 mb-2 p-2 rounded-lg text-xs" style="background:#eff6ff;border:1px solid #bfdbfe;">
+        <label class="flex items-center gap-1 cursor-pointer text-blue-800 font-medium">
+          <input type="checkbox" onchange="toggleSelectAllRows(this.checked)" class="w-4 h-4 accent-blue-600"> 전체
+        </label>
+        <span class="text-blue-800">선택 항목을</span>
+        <select id="bulkStatus" class="px-1.5 py-1 border rounded bg-white" style="border-color:#cbd5e1;">
+          <option value="renounce">상속포기</option>
+          <option value="limited">한정승인</option>
+          <option value="alive">생존</option>
+          <option value="deceased">사망</option>
+        </select>
+        <span class="text-blue-800">(으)로</span>
+        <button onclick="applyBulkStatus()" class="btn-navy px-3 py-1">적용</button>
+        <button onclick="toggleSelectMode()" class="px-2 py-1 text-slate-500 hover:text-slate-700">취소</button>
+        <span id="bulkCount" class="ml-auto text-slate-400"></span>
+      </div>
 
       <div class="overflow-auto" style="max-height: calc(100vh - 280px)">
         <table class="w-full text-xs fixed-cols">
@@ -315,6 +336,19 @@
         <span class="flex items-center gap-1.5"><span class="inline-flex items-center justify-center px-1.5 py-px rounded-full bg-emerald-600 text-white text-[10px] font-bold">한정</span>= 한정승인</span>
         <span class="flex items-center gap-1.5"><span class="inline-flex items-center justify-center px-1.5 py-px rounded-full bg-rose-700 text-white text-[10px] font-bold">포기</span>= 상속포기</span>
       </div>
+      <!-- 🎨 박스 색상 커스터마이즈 -->
+      <details class="mt-2 text-xs no-print">
+        <summary class="cursor-pointer text-blue-600 hover:underline font-medium">🎨 박스 색상 바꾸기</summary>
+        <div class="mt-2 p-3 bg-slate-50 rounded flex flex-wrap gap-x-4 gap-y-2 items-center">
+          <label class="flex items-center gap-1.5">피상속인 <input type="color" id="color_decedent" value="#dc2626" onchange="setColor('decedent',this.value)" class="w-7 h-6 rounded cursor-pointer border border-slate-300"></label>
+          <label class="flex items-center gap-1.5">현 상속인 <input type="color" id="color_heir" value="#d97706" onchange="setColor('heir',this.value)" class="w-7 h-6 rounded cursor-pointer border border-slate-300"></label>
+          <label class="flex items-center gap-1.5">한정승인 <input type="color" id="color_limited" value="#059669" onchange="setColor('limited',this.value)" class="w-7 h-6 rounded cursor-pointer border border-slate-300"></label>
+          <label class="flex items-center gap-1.5">상속포기 <input type="color" id="color_renounce" value="#be185d" onchange="setColor('renounce',this.value)" class="w-7 h-6 rounded cursor-pointer border border-slate-300"></label>
+          <label class="flex items-center gap-1.5">사망 <input type="color" id="color_deceased" value="#475569" onchange="setColor('deceased',this.value)" class="w-7 h-6 rounded cursor-pointer border border-slate-300"></label>
+          <label class="flex items-center gap-1.5">가족 일반 <input type="color" id="color_general" value="#94a3b8" onchange="setColor('general',this.value)" class="w-7 h-6 rounded cursor-pointer border border-slate-300"></label>
+          <button onclick="resetColors()" class="px-2 py-1 rounded text-slate-500 hover:text-slate-700 bg-white" style="border:1px solid #cbd5e1;">기본값 복원</button>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -359,6 +393,41 @@ let zoomLevel = 1;
 let autoHeirEnabled = true;   // 자동 상속 판정 ON/OFF
 let useClaimLabel = false;    // 청구인/청구외 라벨 표시 (실무 표기)
 let compactMode = false;      // 컴팩트 모드 (큰 가족용 viewBox 확대)
+let selectMode = false;       // 상태 일괄 적용 — 행 선택 모드 ON/OFF
+let selectedIds = new Set();  // 일괄 적용 대상으로 체크된 행 id
+
+// 박스 분류별 대표색 (사용자 커스터마이즈) — fill은 이 색을 연하게 자동 생성
+const DEFAULT_COLORS = {
+  decedent: '#dc2626',  // 피상속인(망인)
+  heir:     '#d97706',  // 현 법정상속인(★)
+  limited:  '#059669',  // 한정승인
+  renounce: '#be185d',  // 상속포기
+  deceased: '#475569',  // 사망(청구외 망 등)
+  general:  '#94a3b8'   // 가족 일반(생존)
+};
+let COLORS = { ...DEFAULT_COLORS };
+
+// hex 색을 흰색 쪽으로 amt(0~1)만큼 연하게 (박스 배경용)
+function lighten(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.round(r + (255 - r) * amt);
+  g = Math.round(g + (255 - g) * amt);
+  b = Math.round(b + (255 - b) * amt);
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+function saveColors() { localStorage.setItem('lawts_ft_colors', JSON.stringify(COLORS)); }
+function loadColors() {
+  const raw = localStorage.getItem('lawts_ft_colors');
+  if (raw) { try { COLORS = { ...DEFAULT_COLORS, ...JSON.parse(raw) }; } catch(e) {} }
+}
+function setColor(cat, val) { COLORS[cat] = val; saveColors(); render(); }
+function resetColors() {
+  COLORS = { ...DEFAULT_COLORS };
+  saveColors();
+  Object.keys(COLORS).forEach(k => { const el = document.getElementById('color_' + k); if (el) el.value = COLORS[k]; });
+  render();
+}
 
 function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({people, nextId, autoHeirEnabled, useClaimLabel, compactMode}));
@@ -444,9 +513,51 @@ function newPerson(overrides = {}) {
 }
 
 function addPerson(overrides) {
-  people.push(newPerson(overrides));
+  // 행 추가 시 직전 행과 같은 상태로 자동 복사 (버튼 추가일 때만 — 샘플 로드는 overrides 지정)
+  const last = people[people.length - 1];
+  const inherited = (last && !overrides) ? { status: last.status } : {};
+  people.push(newPerson({ ...inherited, ...(overrides || {}) }));
   save();
   render();
+}
+
+// ── 상태 일괄 적용 (선택한 행만) ──────────────────────────
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  if (!selectMode) selectedIds.clear();
+  renderTable();
+  syncBulkUI();
+}
+function toggleRowCheck(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  syncBulkUI();
+}
+function toggleSelectAllRows(checked) {
+  selectedIds.clear();
+  if (checked) people.forEach(p => selectedIds.add(p.id));
+  renderTable();
+  syncBulkUI();
+}
+function applyBulkStatus() {
+  if (selectedIds.size === 0) { alert('적용할 행을 체크해 주세요.'); return; }
+  const status = document.getElementById('bulkStatus').value;
+  people.forEach(p => { if (selectedIds.has(p.id)) p.status = status; });
+  selectMode = false;
+  selectedIds.clear();
+  save();
+  render();
+  syncBulkUI();
+}
+// 선택 모드 UI 동기화 (버튼 라벨·컨트롤바·카운트)
+function syncBulkUI() {
+  const bar = document.getElementById('bulkBar');
+  const btn = document.getElementById('selectModeBtn');
+  const cnt = document.getElementById('bulkCount');
+  if (!bar || !btn) return;
+  if (selectMode) { bar.classList.remove('hidden'); bar.classList.add('flex'); btn.textContent = '✕ 선택 종료'; }
+  else { bar.classList.add('hidden'); bar.classList.remove('flex'); btn.textContent = '☑ 선택 적용'; }
+  if (cnt) cnt.textContent = selectedIds.size > 0 ? `${selectedIds.size}명 선택` : '';
 }
 
 function deletePerson(id) {
@@ -509,7 +620,7 @@ function renderTable() {
 
     return `
     <tr class="border-b border-slate-200 ${stRow.color}">
-      <td class="px-1 py-1 text-center font-mono text-slate-500">${p.id}</td>
+      <td class="px-1 py-1 text-center font-mono text-slate-500">${selectMode ? `<input type="checkbox" ${selectedIds.has(p.id)?'checked':''} onchange="toggleRowCheck(${p.id})" class="w-4 h-4 accent-blue-600">` : p.id}</td>
       <td class="px-1 py-1">
         <input class="cell" style="width: 56px" value="${escapeAttr(p.name)}" placeholder="이름"
                onchange="updateField(${p.id}, 'name', this.value)">
@@ -1148,12 +1259,16 @@ function drawPersonBox(svg, p, position, isHeir) {
   g.setAttribute('transform', `translate(${x - BOX_W / 2}, ${y - BOX_H / 2})`);
 
   // 색상 결정 (사망은 가족 일반보다 명확히 어두운 회색 + 진한 테두리)
-  let fill = '#f1f5f9', stroke = '#94a3b8', strokeWidth = 1.5;
-  if (p.relation === '망인') { fill = '#fee2e2'; stroke = '#dc2626'; strokeWidth = 2.5; }
-  else if (isHeir) { fill = '#fef3c7'; stroke = '#d97706'; strokeWidth = 2.5; }
-  else if (p.status === 'deceased') { fill = '#cbd5e1'; stroke = '#475569'; strokeWidth = 2; }
-  else if (p.status === 'renounce') { fill = '#fce7f3'; stroke = '#be185d'; }
-  else if (p.status === 'limited') { fill = '#d1fae5'; stroke = '#059669'; }
+  // 분류 결정 → COLORS 대표색 기반 (fill은 그 색을 연하게 자동 생성)
+  let cat = 'general', strokeWidth = 1.5;
+  if (p.relation === '망인') { cat = 'decedent'; strokeWidth = 2.5; }
+  else if (isHeir) { cat = 'heir'; strokeWidth = 2.5; }
+  else if (p.status === 'deceased') { cat = 'deceased'; strokeWidth = 2; }
+  else if (p.status === 'renounce') { cat = 'renounce'; }
+  else if (p.status === 'limited') { cat = 'limited'; }
+  const baseColor = COLORS[cat];
+  let fill = lighten(baseColor, 0.86);
+  let stroke = baseColor;
 
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('width', BOX_W);
@@ -1460,6 +1575,8 @@ function render() {
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
   load();
+  loadColors();
+  Object.keys(COLORS).forEach(k => { const el = document.getElementById('color_' + k); if (el) el.value = COLORS[k]; });
   const toggleAuto = document.getElementById('autoHeirToggle');
   if (toggleAuto) toggleAuto.checked = autoHeirEnabled;
   const toggleClaim = document.getElementById('claimLabelToggle');
