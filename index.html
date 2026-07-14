@@ -227,7 +227,9 @@
 <main class="max-w-[1600px] mx-auto p-4 grid grid-cols-12 gap-4 print-area">
 
   <!-- 좌측: 입력 표 -->
-  <section class="col-span-12 lg:col-span-5 no-print">
+  <!-- 좌측 입력표: 5→6 (순서 ↑↓ 버튼이 생겨 액션열이 넓어짐. 5칸이면 표 폭 510px 이 넘쳐
+       노트북(1280·1440)에서 삭제 ✕ 가 가로 스크롤 밖으로 밀려났다 — ERP 와 동일하게 표에 폭을 준다) -->
+  <section class="col-span-12 lg:col-span-6 no-print">
     <div class="ds-card p-4">
       <div class="flex items-center justify-between mb-3">
         <h2 class="page-h2">인적사항 입력</h2>
@@ -272,15 +274,16 @@
         <table class="w-full text-xs fixed-cols">
           <thead class="bg-slate-100 sticky top-0">
             <tr class="border-b border-slate-300">
-              <th class="px-1 py-2 w-8">#</th>
+              <th class="px-1 py-2" style="width:24px">#</th>
               <th class="px-1 py-2 text-left" style="width:60px">이름</th>
-              <th class="px-1 py-2 text-left w-20">관계</th>
+              <th class="px-1 py-2 text-left" style="width:68px">관계</th>
               <th class="px-1 py-2 text-center w-16">부모</th>
-              <th class="px-1 py-2 text-left w-10">성별</th>
+              <th class="px-1 py-2 text-left" style="width:36px">성별</th>
               <th class="px-1 py-2 text-left" style="width:42px">생년</th>
               <th class="px-1 py-2 text-left w-24">사망일</th>
               <th class="px-1 py-2 text-left w-16">상태</th>
-              <th class="px-1 py-2 w-8"></th>
+              <!-- 순서 ↑↓ + 삭제 — 표 전체 폭은 그대로 두고 #·관계·성별에서 24px 회수해 여기에 배분 -->
+              <th class="px-1 py-2" style="width:56px"></th>
             </tr>
           </thead>
           <tbody id="peopleTable"></tbody>
@@ -292,7 +295,7 @@
   </section>
 
   <!-- 우측: 가계도 + 상속인 -->
-  <section class="col-span-12 lg:col-span-7 print-area">
+  <section class="col-span-12 lg:col-span-6 print-area">
     <!-- 상속인 요약 -->
     <div class="ds-card p-4 mb-4">
       <h2 class="page-h2 mb-1 flex items-center gap-2">
@@ -657,8 +660,21 @@ function renderTable() {
           ${STATUSES.map(s => `<option value="${s.value}" ${p.status===s.value?'selected':''}>${s.label}</option>`).join('')}
         </select>
       </td>
-      <td class="px-1 py-1 text-center">
-        <button onclick="deletePerson(${p.id})" class="text-rose-500 hover:text-rose-700" title="삭제">✕</button>
+      <td class="px-1 py-1">
+        <div class="flex items-center justify-center gap-1">
+          ${ftGroupSize(p) >= 2 ? `
+          <div class="flex flex-col leading-none">
+            <button onclick="movePersonInRow(${p.id}, 'up')" ${ftCanMove(p, 'up') ? '' : 'disabled'}
+                    class="h-3.5 w-4 rounded text-[9px] text-slate-400 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-20 disabled:hover:bg-transparent"
+                    title="같은 줄에서 위로" aria-label="${escapeAttr(p.name || p.relation)} 위로">▲</button>
+            <button onclick="movePersonInRow(${p.id}, 'down')" ${ftCanMove(p, 'down') ? '' : 'disabled'}
+                    class="h-3.5 w-4 rounded text-[9px] text-slate-400 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-20 disabled:hover:bg-transparent"
+                    title="같은 줄에서 아래로" aria-label="${escapeAttr(p.name || p.relation)} 아래로">▼</button>
+          </div>
+          <span class="w-px h-5 bg-slate-200" aria-hidden="true"></span>` : ''}
+          <button onclick="deletePerson(${p.id})" class="rounded px-1 py-0.5 leading-none text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                  title="삭제" aria-label="${escapeAttr(p.name || p.relation)} 삭제">✕</button>
+        </div>
       </td>
     </tr>`;
   }).join('');
@@ -666,6 +682,169 @@ function renderTable() {
 
 function escapeAttr(s) {
   return String(s ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// 🔒 HTML "본문" 삽입용 이스케이프 — innerHTML 로 사용자 입력(이름)을 넣을 땐 반드시 이걸로.
+//   escapeAttr 은 속성값용. 자동분석 패널이 이름을 본문에 raw 로 넣어 stored-XSS 가 있었다
+//   (JSON 불러오기로 남의 브라우저에서 스크립트 실행 가능) — 2026-07-14 수정.
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ============================================================
+// 같은 줄 순서 변경 — ERP 가계도와 동일 로직 이식 (2026-07-14)
+//   원리: 레이아웃의 좌우 좌표 = people 배열 순서. 그래서 "배열만 재정렬"하면
+//        가계도 계산식은 손대지 않고 화면 순서가 바뀐다.
+// ============================================================
+
+// 같은 줄(형제 그룹) 판정. 단독 배치 인물(망인·배우자·부모·조부모 등)은 null = 순서변경 대상 아님.
+function ftRowGroupKey(p) {
+  switch (p.relation) {
+    case '자녀': case '형제자매': case '4촌': case '기타':
+      return p.relation;
+    case '손자녀': case '조카': case '질손':
+      return `${p.relation}:${p.parentId || ''}`; // 같은 부모 밑에서만 교환(부모선 꼬임 방지)
+    default:
+      return null;
+  }
+}
+
+// 그 줄에 2명 이상 있어야 순서변경 의미가 있음
+function ftGroupSize(p) {
+  const key = ftRowGroupKey(p);
+  if (key == null) return 0;
+  return people.filter((x) => ftRowGroupKey(x) === key).length;
+}
+
+// 그 방향으로 같은 줄 이웃이 있나(버튼 비활성 판정)
+function ftCanMove(p, dir) {
+  const idx = people.findIndex((x) => x.id === p.id);
+  const key = ftRowGroupKey(p);
+  if (idx < 0 || key == null) return false;
+  const step = dir === 'up' ? -1 : 1;
+  for (let j = idx + step; j >= 0 && j < people.length; j += step) {
+    if (ftRowGroupKey(people[j]) === key) return true;
+  }
+  return false;
+}
+
+// 표 ↑↓ — 같은 줄 안에서 가장 가까운 이웃과 스왑. 이동 불가면 false.
+function movePersonInRow(id, dir) {
+  const idx = people.findIndex((p) => p.id === id);
+  if (idx < 0) return false;
+  const key = ftRowGroupKey(people[idx]);
+  if (key == null) return false;
+  const step = dir === 'up' ? -1 : 1;
+  let j = idx + step;
+  while (j >= 0 && j < people.length && ftRowGroupKey(people[j]) !== key) j += step; // 같은 줄 이웃까지 건너뜀
+  if (j < 0 || j >= people.length) return false; // 그 방향 끝
+  [people[idx], people[j]] = [people[j], people[idx]];
+  save();
+  render();
+  return true;
+}
+
+// 트리 드래그 — 한 줄 구성원을 orderedIds 순서로 원래 슬롯에 채워 넣음.
+//   그 그룹 구성원과 정확히 일치하지 않으면(누락·중복·타그룹) 안전하게 무시.
+function reorderRow(groupKey, orderedIds) {
+  const slots = people.map((p, i) => (ftRowGroupKey(p) === groupKey ? i : -1)).filter((i) => i >= 0);
+  const groupIds = new Set(slots.map((i) => people[i].id));
+  if (orderedIds.length !== groupIds.size) return false;
+  const seen = new Set();
+  for (const id of orderedIds) {
+    if (!groupIds.has(id) || seen.has(id)) return false;
+    seen.add(id);
+  }
+  const byId = new Map(people.map((p) => [p.id, p]));
+  slots.forEach((slot, k) => { people[slot] = byId.get(orderedIds[k]); });
+  save();
+  render();
+  return true;
+}
+
+// ── SVG 레이어: 선(매번 새로) / 박스(id 로 재사용) ──
+//   🔴 박스 <g> 를 살려둬야 순서가 바뀔 때 transform 이 CSS transition 으로 "스르륵" 이동한다.
+//      (예전처럼 svg.innerHTML='' 로 통째 재생성하면 노드가 죽어 애니메이션이 안 됨)
+//   filter 도 같이 적는다 — 인라인 transition 은 .person-box 의 CSS transition(filter .15s, hover 밝아짐)을
+//   통째로 덮어쓰므로, 안 넣으면 hover 효과가 끊긴다.
+const FT_TRANS = 'transform .26s cubic-bezier(0.34, 1.1, 0.5, 1), filter .15s';
+const FT_SVGNS = 'http://www.w3.org/2000/svg';
+function ftEnsureLayers(svg) {
+  let lines = svg.querySelector('#ftLines');
+  let boxes = svg.querySelector('#ftBoxes');
+  if (!lines || !boxes) {
+    svg.innerHTML = '';
+    lines = document.createElementNS(FT_SVGNS, 'g'); lines.setAttribute('id', 'ftLines');
+    boxes = document.createElementNS(FT_SVGNS, 'g'); boxes.setAttribute('id', 'ftBoxes');
+    svg.appendChild(lines);
+    svg.appendChild(boxes); // 박스를 뒤에 = 선 위에 그려짐
+  }
+  lines.innerHTML = ''; // 선만 매 렌더 새로
+  return { lines, boxes };
+}
+function ftLines() { return document.getElementById('ftLines'); }
+function ftBoxes() { return document.getElementById('ftBoxes'); }
+
+// ── 트리 드래그로 같은 줄 순서 변경 ──
+//   화면 좌표 → SVG 좌표 변환(getScreenCTM)으로 viewBox·줌·스크롤을 자동 보정한다.
+let ftDrag = null;
+function ftSvgX(clientX, clientY) {
+  const svg = document.getElementById('familySvg');
+  const ctm = svg && svg.getScreenCTM();
+  if (!ctm) return null;
+  return new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse()).x;
+}
+function ftBoxDown(e) {
+  const g = e.currentTarget;
+  const gkey = g.dataset.gkey;
+  if (!gkey) return; // 같은 줄에 혼자면 드래그 없음
+  const ptx = ftSvgX(e.clientX, e.clientY);
+  if (ptx == null) return;
+  e.preventDefault();
+  try { g.setPointerCapture(e.pointerId); } catch (_) {}
+  ftDrag = { id: Number(g.dataset.pid), gkey, bx: Number(g.dataset.bx), by: Number(g.dataset.by), startX: ptx, dx: 0 };
+  g.style.transition = 'none'; // 끄는 동안엔 커서를 즉시 따라가야 함
+  g.style.cursor = 'grabbing';
+  g.style.opacity = '0.9';
+  ftBoxes().appendChild(g); // 맨 나중에 그린 게 위 → 끌리는 박스가 위로
+}
+function ftBoxMove(e) {
+  if (!ftDrag) return;
+  const g = e.currentTarget;
+  if (Number(g.dataset.pid) !== ftDrag.id) return;
+  const ptx = ftSvgX(e.clientX, e.clientY);
+  if (ptx == null) return;
+  ftDrag.dx = ptx - ftDrag.startX;
+  g.setAttribute('transform', `translate(${ftDrag.bx + ftDrag.dx - BOX_W / 2}, ${ftDrag.by - BOX_H / 2})`);
+}
+function ftBoxUp(e) {
+  if (!ftDrag) return;
+  const g = e.currentTarget;
+  try { g.releasePointerCapture(e.pointerId); } catch (_) {}
+  g.style.transition = FT_TRANS; // 놓으면 새 자리로 스르륵
+  g.style.cursor = 'grab';
+  g.style.opacity = '';
+  const { gkey, id, dx } = ftDrag;
+  ftDrag = null;
+
+  const grp = Array.from(ftBoxes().querySelectorAll(`g[data-gkey="${gkey}"]`));
+  const effX = (el) => Number(el.dataset.bx) + (Number(el.dataset.pid) === id ? dx : 0);
+
+  // 🔴 이 줄의 "배열 순서 → 화면 x" 방향을 실측한다.
+  //    자녀는 배열 앞이 왼쪽이지만, 형제자매는 x = cx - xOffset 이라 배열 뒤로 갈수록 왼쪽(역방향).
+  //    방향을 안 보고 항상 좌→우로 정렬하면 끈 방향과 반대로 배치된다(왼쪽으로 끌면 오른쪽으로 감).
+  const arrIds = people.filter((p) => ftRowGroupKey(p) === gkey).map((p) => p.id);
+  const bxOf = (pid) => {
+    const el = grp.find((g2) => Number(g2.dataset.pid) === pid);
+    return el ? Number(el.dataset.bx) : 0;
+  };
+  const leftToRight = arrIds.length < 2 || bxOf(arrIds[0]) < bxOf(arrIds[arrIds.length - 1]);
+
+  // 놓인 위치대로 정렬 → 그 순서를 배열 슬롯에 채운다(줄의 방향에 맞춰서)
+  const orderedIds = grp
+    .sort((a, b) => (leftToRight ? effX(a) - effX(b) : effX(b) - effX(a)))
+    .map((el) => Number(el.dataset.pid));
+  if (!reorderRow(gkey, orderedIds)) render(); // 무효면 제자리 복귀
 }
 
 // ============================================================
@@ -849,11 +1028,11 @@ function renderHeirSummary() {
   const heirNames = result.heirs.length === 0
     ? '<span class="text-slate-400">(없음)</span>'
     : result.heirs.map(h => {
-        const tag = h._substitute ? `<span class="text-xs text-purple-700">(대습 ← ${h._substituteFrom})</span>` : '';
+        const tag = h._substitute ? `<span class="text-xs text-purple-700">(대습 ← ${escapeHtml(h._substituteFrom)})</span>` : '';
         const stTag = h.status === 'limited'
           ? '<span class="ml-1 text-[10px] bg-emerald-600 text-white px-1.5 py-px rounded-full font-bold">한정</span>'
           : '';
-        return `<span class="inline-block bg-amber-50 border border-amber-300 px-2 py-0.5 rounded mx-0.5 my-0.5">${h.name || '(무명)'}${stTag} ${tag}</span>`;
+        return `<span class="inline-block bg-amber-50 border border-amber-300 px-2 py-0.5 rounded mx-0.5 my-0.5">${escapeHtml(h.name) || '(무명)'}${stTag} ${tag}</span>`;
       }).join('');
 
   // 사실 요약
@@ -868,7 +1047,7 @@ function renderHeirSummary() {
         const color = c.status === 'limited' ? 'bg-emerald-50 border-emerald-300' : 'bg-rose-50 border-rose-300';
         const badge = c.status === 'limited' ? '한정' : '포기';
         const bcolor = c.status === 'limited' ? 'bg-emerald-600' : 'bg-rose-600';
-        return `<span class="inline-block ${color} border px-2 py-0.5 rounded mx-0.5 my-0.5">${c.name || '(무명)'}<span class="ml-1 text-[10px] ${bcolor} text-white px-1.5 py-px rounded-full font-bold">${badge}</span></span>`;
+        return `<span class="inline-block ${color} border px-2 py-0.5 rounded mx-0.5 my-0.5">${escapeHtml(c.name) || '(무명)'}<span class="ml-1 text-[10px] ${bcolor} text-white px-1.5 py-px rounded-full font-bold">${badge}</span></span>`;
       }).join('');
 
   // 청구인은 있는데 ★(법정상속인) 없는 케이스 = 가장 흔한 혼동 → 안내
@@ -905,15 +1084,16 @@ const HORI_X = 140;  // 같은 세대 박스 간격
 
 function renderTree() {
   const svg = document.getElementById('familySvg');
-  svg.innerHTML = '';
 
   const deceased = people.find(p => p.relation === '망인');
   if (!deceased) {
     svg.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="#94a3b8" font-size="16">
       좌측 표에서 망인을 지정하면 가계도가 그려집니다
     </text>`;
-    return;
+    return; // 레이어 폐기 — 다음 렌더에서 ftEnsureLayers 가 다시 만든다
   }
+  // 선(매번 새로) / 박스(id 로 재사용 → 순서 변경 시 스르륵 이동) 레이어 확보
+  ftEnsureLayers(svg);
 
   // === 위치 계산 ===
   const pos = {};
@@ -1231,11 +1411,15 @@ function renderTree() {
     gs.forEach(g => drawParentChildLine(svg, midPt, pos[g.id]));
   });
 
-  // === 박스 그리기 ===
+  // === 박스 그리기 (id 로 재사용 — 순서가 바뀌면 transform 만 갱신돼 스르륵 이동) ===
+  const drawn = new Set();
   people.forEach(p => {
     if (!pos[p.id]) return;
     drawPersonBox(svg, p, pos[p.id], heirIds.has(p.id));
+    drawn.add(String(p.id));
   });
+  // 삭제됐거나 배치 대상이 아닌 인물의 박스 정리
+  ftBoxes().querySelectorAll('g[data-pid]').forEach(g => { if (!drawn.has(g.dataset.pid)) g.remove(); });
 }
 
 // 결혼선 (가로 직선)
@@ -1246,7 +1430,7 @@ function drawMarriageLine(svg, p1, p2) {
   line.setAttribute('x2', p2.x);
   line.setAttribute('y2', p2.y);
   line.setAttribute('class', 'marriage-line');
-  svg.appendChild(line);
+  ftLines().appendChild(line); // 선 레이어(매 렌더 새로 그림)
 }
 
 // 부모-자녀선 (수직 + 수평)
@@ -1258,15 +1442,24 @@ function drawParentChildLine(svg, parentPt, childPos) {
   const d = `M ${parentPt.x} ${parentPt.y} L ${parentPt.x} ${midY} L ${cx} ${midY} L ${cx} ${cy}`;
   path.setAttribute('d', d);
   path.setAttribute('class', 'parent-line');
-  svg.appendChild(path);
+  ftLines().appendChild(path); // 선 레이어(매 렌더 새로 그림)
 }
 
 // 박스
 function drawPersonBox(svg, p, position, isHeir) {
   const { x, y } = position;
-  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  g.setAttribute('class', 'person-box');
-  g.setAttribute('transform', `translate(${x - BOX_W / 2}, ${y - BOX_H / 2})`);
+  // 🔴 박스 <g> 는 인물 id 로 "재사용" — 노드를 살려둬야 순서가 바뀔 때 transform 이
+  //    CSS transition 을 타고 새 자리로 스르륵 이동한다(통째 재생성하면 애니메이션 불가).
+  const layer = ftBoxes();
+  let g = layer.querySelector(`g[data-pid="${p.id}"]`);
+  const isNew = !g;
+  if (isNew) {
+    // 새 박스는 "최종 위치를 정한 뒤에" DOM 에 붙인다(아래 참조) → 첫 등장은 애니메이션 없음.
+    g = document.createElementNS(FT_SVGNS, 'g');
+    g.setAttribute('class', 'person-box');
+    g.dataset.pid = String(p.id);
+  }
+  while (g.firstChild) g.removeChild(g.firstChild); // 내용(이름·색·배지)만 새로, <g> 는 유지
 
   // 색상 결정 (사망은 가족 일반보다 명확히 어두운 회색 + 진한 테두리)
   // 분류 결정 → COLORS 대표색 기반 (fill은 그 색을 연하게 자동 생성)
@@ -1391,7 +1584,49 @@ function drawPersonBox(svg, p, position, isHeir) {
     g.appendChild(dbadge);
   }
 
-  svg.appendChild(g);
+  // ── 같은 줄 순서 변경: 드래그 ──
+  //   같은 줄(형제 그룹)에 2명 이상일 때만 끌 수 있다. 드롭 시 좌우 위치대로 순서 재배치.
+  const gkey = ftRowGroupKey(p);
+  const canDrag = gkey != null && ftGroupSize(p) >= 2;
+  g.dataset.bx = String(x); // 드롭 시 좌우 순서 계산 기준(레이아웃 x)
+  g.dataset.by = String(y);
+  if (canDrag) {
+    g.dataset.gkey = gkey;
+    g.style.cursor = 'grab';
+    g.style.touchAction = 'none';
+    g.onpointerdown = ftBoxDown;
+    g.onpointermove = ftBoxMove;
+    g.onpointerup = ftBoxUp;
+    g.onpointercancel = ftBoxUp;
+    // 끌 수 있다는 표시 — 우하단 점 4개(그립)
+    const grip = document.createElementNS(FT_SVGNS, 'g');
+    grip.setAttribute('fill', '#cbd5e1');
+    [[BOX_W - 12, BOX_H - 7], [BOX_W - 8, BOX_H - 7], [BOX_W - 12, BOX_H - 3], [BOX_W - 8, BOX_H - 3]].forEach(([gx, gy]) => {
+      const dot = document.createElementNS(FT_SVGNS, 'circle');
+      dot.setAttribute('cx', gx); dot.setAttribute('cy', gy); dot.setAttribute('r', 1.3);
+      grip.appendChild(dot);
+    });
+    g.appendChild(grip);
+    const tip = document.createElementNS(FT_SVGNS, 'title');
+    tip.textContent = '좌우로 끌어서 같은 줄 순서 변경';
+    g.appendChild(tip);
+  } else {
+    delete g.dataset.gkey;
+    g.style.cursor = '';
+    g.onpointerdown = g.onpointermove = g.onpointerup = g.onpointercancel = null;
+  }
+
+  // 위치 반영 (드래그 중인 박스는 커서를 따라간 자리 유지)
+  const held = ftDrag && ftDrag.id === p.id;
+  const px = held ? x + ftDrag.dx : x;
+  g.setAttribute('transform', `translate(${px - BOX_W / 2}, ${y - BOX_H / 2})`);
+
+  if (isNew) {
+    // 최종 위치가 이미 박힌 채로 DOM 에 진입 → 첫 등장은 애니메이션 안 함.
+    // 그 뒤에 transition 을 켜므로, 이후 순서 변경 때의 transform 변화만 스르륵 이동한다.
+    layer.appendChild(g);
+    g.style.transition = FT_TRANS;
+  }
 }
 
 // 줌
