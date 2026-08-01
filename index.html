@@ -1112,17 +1112,61 @@ function renderTree() {
   const siblings = people.filter(p => p.relation === '형제자매');
   const siblingSpouses = people.filter(p => p.relation === '형제자매의배우자');
   const sibHasSpouse = (sid) => siblingSpouses.some(ss => String(ss.parentId) === String(sid));
+
+  // ── 자식 그룹 폭 (겹침 방지 단일출처) ──────────────────────────────
+  // 🔴 2026-08-01 수정: 아래 세대(손자녀·질손)는 "각자 부모 중심"으로만 펼쳐지고 옆 그룹과의
+  //   충돌을 보지 않았다 → 형제·조카 중 누가 자식을 2명 이상 두면 **인원수와 무관하게** 겹쳤다.
+  //   (실측: 7명에서도 40px 겹침 / 20명이어도 자식이 1명씩이면 멀쩡. "15명 넘으면 겹친다"는 통설은 사실이 아님)
+  //   인접 부모 사이를 "양쪽 자식 반폭"만큼 더 벌려 해결. 한쪽에 자식이 없으면 같은 세대에서
+  //   부딪칠 상대가 없으므로 벌리지 않는다(기존 샘플 좌표 보존).
+  const childSpousesL = people.filter(p => p.relation === '자녀의배우자');
+  const childHasSpouseL = (cid) => childSpousesL.some(cs => String(cs.parentId) === String(cid));
+  const childrenL = people.filter(p => p.relation === '자녀');
+  const nephewSpousesL = people.filter(p => p.relation === '조카의배우자');
+  const nephewHasSpouseL = (nid) => nephewSpousesL.some(x => String(x.parentId) === String(nid));
+  const nephewsL = people.filter(p => p.relation === '조카');
+  const kidCntOf = (rel, parentId) =>
+    people.filter(p => p.relation === rel && String(p.parentId) === String(parentId)).length;
+  const halfSpan = (cnt) => (cnt > 1 ? ((cnt - 1) * HORI_X) / 2 : 0);
+  const extraGap = (leftCnt, rightCnt) =>
+    (leftCnt > 0 && rightCnt > 0) ? halfSpan(leftCnt) + halfSpan(rightCnt) : 0;
+  const childrenSpan = () => {
+    let cum = 0;
+    childrenL.forEach((c, i) => {
+      if (i === 0) return;
+      cum += HORI_X;
+      if (childHasSpouseL(childrenL[i - 1].id)) cum += HORI_X * 0.95;
+      cum += extraGap(kidCntOf('손자녀', childrenL[i - 1].id), kidCntOf('손자녀', c.id));
+    });
+    return cum;
+  };
+  // 🔴 좌우를 따로 재야 한다 — 조카는 부모 중심(±cum/2) 배치인데 양 끝 조카의 질손이 그 밖으로
+  //   더 튀어나오고, 그 폭이 좌우로 다를 수 있다. 한 값으로 밀면 형제 라인끼리 완전히 포개진다.
+  const nephewsExtentOf = (sibId) => {
+    const ns = nephewsL.filter(n => String(n.parentId) === String(sibId));
+    if (ns.length === 0) return { left: 0, right: 0 };
+    let cum = 0;
+    ns.forEach((n, i) => {
+      if (i === 0) return;
+      cum += HORI_X;
+      if (nephewHasSpouseL(ns[i - 1].id)) cum += HORI_X * 0.95;
+      cum += extraGap(kidCntOf('질손', ns[i - 1].id), kidCntOf('질손', n.id));
+    });
+    return {
+      left: cum / 2 + halfSpan(kidCntOf('질손', ns[0].id)),
+      right: cum / 2 + halfSpan(kidCntOf('질손', ns[ns.length - 1].id)),
+    };
+  };
+
   // 망인 자녀 그룹이 중심에서 좌측으로 차지하는 폭 (형제 시작점을 그만큼 밀어 겹침 방지)
-  const childCnt = people.filter(p => p.relation === '자녀').length;
-  const childGroupHalf = childCnt > 0 ? ((childCnt - 1) * HORI_X) / 2 + 70 : 0;
-  const nephewCntOf = (sid) => people.filter(p => p.relation === '조카' && String(p.parentId) === String(sid)).length;
+  const childGroupHalf =
+    childrenL.length > 0 ? childrenSpan() / 2 + halfSpan(kidCntOf('손자녀', childrenL[0].id)) + 70 : 0;
   let xOffset = childGroupHalf;
   siblings.forEach((s, i) => {
-    const nCnt = nephewCntOf(s.id);
-    const subHalf = nCnt > 1 ? ((nCnt - 1) * 140) / 2 : 0;  // 이 형제 조카가 좌우로 펼쳐지는 폭의 절반
-    xOffset += HORI_X + subHalf;       // 조카 우측 폭만큼 형제를 더 좌측에 배치
+    const ext = nephewsExtentOf(s.id);  // 이 형제의 조카·질손이 좌우로 뻗는 폭(비대칭)
+    xOffset += HORI_X + ext.right;     // 조카 우측 폭만큼 형제를 더 좌측에 배치
     pos[s.id] = { x: cx - xOffset, y: cy };
-    xOffset += subHalf;                // 조카 좌측 폭만큼 다음 형제를 더 좌측으로
+    xOffset += ext.left;               // 조카 좌측 폭만큼 다음 형제를 더 좌측으로
     // 배우자가 좌측에 들어가므로 다음 형제는 배우자 폭만큼 더 좌측으로
     if (sibHasSpouse(s.id)) {
       xOffset += HORI_X * 0.95;
@@ -1174,6 +1218,7 @@ function renderTree() {
     if (i > 0) {
       cumChild += HORI_X;
       if (childHasSpouse(children[i - 1].id)) cumChild += HORI_X * 0.95;
+      cumChild += extraGap(kidCntOf('손자녀', children[i - 1].id), kidCntOf('손자녀', c.id));  // 손자녀끼리 겹침 방지
     }
     childOffsets.push(cumChild);
   });
@@ -1234,6 +1279,7 @@ function renderTree() {
       if (i > 0) {
         cumN += SPACING;
         if (nephewHasSpouse(ns[i - 1].id)) cumN += HORI_X * 0.95;
+        cumN += extraGap(kidCntOf('질손', ns[i - 1].id), kidCntOf('질손', n.id));  // 질손끼리 겹침 방지
       }
       nOffsets.push(cumN);
     });
