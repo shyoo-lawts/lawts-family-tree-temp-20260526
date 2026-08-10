@@ -464,12 +464,19 @@ function resetColors() {
 function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({people, nextId, autoHeirEnabled, useClaimLabel, compactMode}));
 }
+// 🔴 옛 문서의 「기타」 → 「직접입력」 승격. **문서가 들어오는 문마다** 이걸 지나야 한다.
+//   불러오기(JSON)에서 빠뜨렸더니 옛 파일의 「기타」가 트리에서 통째로 사라졌다
+//   (배치는 '직접입력'만 찾으므로 좌표가 안 잡힌다 — 조용히 없어진다).
+function promoteOldRelations(list) {
+  return (list || []).map(p => (p && p.relation === '기타') ? { ...p, relation: '직접입력' } : p);
+}
+
 function load() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return;
   try {
     const data = JSON.parse(raw);
-    people = (data.people || []).map(p => (p && p.relation === '기타') ? { ...p, relation: '직접입력' } : p);
+    people = promoteOldRelations(data.people);
     nextId = data.nextId || (people.length + 1);
     if (typeof data.autoHeirEnabled === 'boolean') autoHeirEnabled = data.autoHeirEnabled;
     if (typeof data.useClaimLabel === 'boolean') useClaimLabel = data.useClaimLabel;
@@ -2066,7 +2073,7 @@ function importJSON(event) {
     try {
       const data = JSON.parse(e.target.result);
       if (!Array.isArray(data.people)) throw new Error('형식 오류');
-      people = data.people;
+      people = promoteOldRelations(data.people);
       nextId = data.nextId || (people.length + 1);
       save();
       render();
