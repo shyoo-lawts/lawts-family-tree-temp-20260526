@@ -618,7 +618,9 @@ function addPerson(overrides) {
   // 행 추가 시 직전 행과 같은 상태로 자동 복사 (버튼 추가일 때만 — 샘플 로드는 overrides 지정)
   const last = people[people.length - 1];
   const inherited = (last && !overrides) ? { status: last.status } : {};
-  people.push(newPerson({ ...inherited, ...(overrides || {}) }));
+  // 첫 행은 「망인」 — 어차피 망인부터 적고 시작한다
+  const firstRow = (!overrides && people.length === 0) ? { relation: '망인' } : {};
+  people.push(newPerson({ ...inherited, ...firstRow, ...(overrides || {}) }));
   save();
   render();
 }
