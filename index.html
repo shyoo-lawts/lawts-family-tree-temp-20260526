@@ -34,15 +34,19 @@
   /* 🔴 순수 CSS 로 쓴다. 예전엔 @apply 로 썼는데 이 페이지는 Tailwind CDN 이 <style> 을 처리하지 않아
      **폭도 여백도 하나도 안 먹었다**(computed padding 0px). 그래서 드롭다운이 제 칸을 안 지키고
      내용 길이만큼 부풀어 옆 칸을 덮었다 — 관계 칸 92px 인데 select 가 118px. */
-  .cell { width: 100%; box-sizing: border-box; min-width: 0; padding: 3px 6px; font-size: 12px;
+  /* 🔴 높이를 못 박는다. 안 박으면 글상자 24 · 드롭다운 25 · 날짜칸 26px 로 제각각이라
+     한 행 안에서 밑선이 안 맞는다 — 「지저분해 보인다」의 진짜 원인이 이거였다(실측). */
+  .cell { width: 100%; height: 28px; box-sizing: border-box; min-width: 0; padding: 3px 6px; font-size: 12px;
           line-height: 1.35; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
+  .cell-sub { height: 24px; font-size: 11px; color: #475569; background: #f8fafc; }   /* 직접입력 명칭 — 곁가지임을 색으로 */
+  table.fixed-cols tbody tr:hover { filter: brightness(0.985); }                       /* 지금 보는 행 */
   .cell:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
   /* 두 줄이 되는 행(직접입력의 명칭 칸)이 있어도 다른 칸이 둥둥 뜨지 않게 위로 붙인다 */
   table.fixed-cols td { vertical-align: top; }
   /* 표 컬럼 너비 강제.
      🔴 min-width 가 핵심 — 패널이 좁아지면 칸들이 **겹치는 대신 가로로 스크롤**된다.
         (없으면 고정폭 합이 패널 폭을 넘는 순간 이름 칸이 0px 로 찌그러지고 내용이 옆 칸을 덮는다) */
-  table.fixed-cols { table-layout: fixed; min-width: 780px; }
+  table.fixed-cols { table-layout: fixed; min-width: 960px; }
   /* 셀 사이 여백 + 구분선 — 관계·부모 등 드롭다운이 붙어 보이는 문제 방지 */
   table.fixed-cols td { padding-left: 6px; padding-right: 6px; }
   table.fixed-cols td:not(:last-child) { border-right: 1px solid #e2e8f0; }
@@ -286,16 +290,16 @@
               <!-- 🔴 폭은 실측으로 정했다. 예전엔 관계 92px 에 118px 짜리를 넣고(겹침),
                    상세는 394px 중 262px 를 놀렸다. 남는 폭은 **이름**이 먹는다(사람이 실제로 읽는 칸). -->
               <th class="px-1 py-2" style="width:3%">#</th>
-              <th class="px-1 py-2 text-left" style="width:16%">이름</th>
+              <th class="px-1 py-2 text-left" style="width:17%">이름</th>
               <th class="px-1 py-2 text-left" style="width:14%">관계</th>
               <!-- 🔴 관계에 따라 물어보는 게 달라진다 — 칸을 늘리는 대신 한 칸이 모습을 바꾼다 -->
-              <th class="px-1 py-2 text-center" style="width:24%">누구의 · 상세</th>
-              <th class="px-1 py-2 text-left" style="width:6%">성별</th>
-              <th class="px-1 py-2 text-left" style="width:7%">생년</th>
-              <th class="px-1 py-2 text-left" style="width:14%">사망일</th>
-              <th class="px-1 py-2 text-left" style="width:9%">상태</th>
+              <th class="px-1 py-2 text-left" style="width:26%">누구의 · 상세</th>
+              <th class="px-1 py-2 text-left" style="width:5%">성별</th>
+              <th class="px-1 py-2 text-left" style="width:6%">생년</th>
+              <th class="px-1 py-2 text-left" style="width:13%">사망일</th>
+              <th class="px-1 py-2 text-left" style="width:10%">상태</th>
               <!-- 순서 ↑↓ + 삭제 — 표 전체 폭은 그대로 두고 #·관계·성별에서 24px 회수해 여기에 배분 -->
-              <th class="px-1 py-2" style="width:7%"></th>
+              <th class="px-1 py-2 text-center text-[10px] font-normal text-slate-400" style="width:56px">순서·삭제</th>
             </tr>
           </thead>
           <tbody id="peopleTable"></tbody>
@@ -715,7 +719,7 @@ function renderTable() {
       //   「누구의·무엇」만 받고 촌수는 우리가 세어 보여 준다 → 사용자에겐 검산이 된다.
       const deg = kinshipDegree(p.id);
       parentCell = `<div class="flex items-center gap-1">
-        <select class="cell" style="background:#eef2f7" onchange="updateField(${p.id}, 'refId', this.value)" aria-label="누구의">
+        <select class="cell" style="background:#eef2f7;flex:1 1 auto;min-width:0" onchange="updateField(${p.id}, 'refId', this.value)" aria-label="누구의">
           <option value="">누구의?</option>${사람옵션(p.refId, false)}
         </select>
         <select class="cell" style="background:#eef2f7;flex:0 0 76px" onchange="updateField(${p.id}, 'refKind', this.value)" aria-label="무엇">
@@ -727,7 +731,7 @@ function renderTable() {
     } else if (p.relation === '배우자') {
       const spouseList = people.filter(x => x.relation === '배우자');
       parentCell = `<div class="flex items-center gap-1">
-        <select class="cell" style="background:#eef2f7" onchange="updateField(${p.id}, 'maritalStatus', this.value)" aria-label="혼인상태">
+        <select class="cell" style="background:#eef2f7;flex:0 0 104px" onchange="updateField(${p.id}, 'maritalStatus', this.value)" aria-label="혼인상태">
           ${MARITAL.map(m => `<option value="${m.value}" ${(p.maritalStatus||'married')===m.value?'selected':''}>${m.label}</option>`).join('')}
         </select>
         ${spouseList.length > 1 ? `<select class="cell" style="background:#eef2f7;flex:0 0 74px" onchange="updateField(${p.id}, 'spouseOrder', this.value)" aria-label="혼인 순서">
@@ -736,13 +740,13 @@ function renderTable() {
       </div>`;
     } else if (p.relation === '자녀' && people.filter(x => x.relation === '배우자').length > 1) {
       // 배우자가 여럿일 때만 묻는다 — 하나뿐이면 뻔한 걸 묻는 꼴이다
-      parentCell = `<select class="cell" style="background:#eef2f7" onchange="updateField(${p.id}, 'otherParentId', this.value)" aria-label="누구 소생">
+      parentCell = `<select class="cell" style="background:#eef2f7;max-width:280px" onchange="updateField(${p.id}, 'otherParentId', this.value)" aria-label="누구 소생">
           <option value="">소생 미지정</option>
           ${people.filter(x => x.relation === '배우자').map(x =>
             `<option value="${x.id}" ${String(p.otherParentId||'')===String(x.id)?'selected':''}>${escapeAttr(x.name) || `#${x.id}`} 소생</option>`).join('')}
         </select>`;
     } else if (needsParent(p.relation)) {
-      parentCell = `<select class="cell" style="background:#eef2f7" onchange="updateField(${p.id}, 'parentId', this.value)" title="부모 선택">
+      parentCell = `<select class="cell" style="background:#eef2f7;max-width:280px" onchange="updateField(${p.id}, 'parentId', this.value)" title="부모 선택">
            <option value="">- 선택 -</option>${사람옵션(p.parentId, true)}
          </select>`;
     } else {
@@ -753,7 +757,7 @@ function renderTable() {
     <tr class="border-b border-slate-200 ${stRow.color}">
       <td class="px-1 py-1 text-center font-mono text-slate-500">${selectMode ? `<input type="checkbox" ${selectedIds.has(p.id)?'checked':''} onchange="toggleRowCheck(${p.id})" class="w-4 h-4 accent-blue-600">` : p.id}</td>
       <td class="px-1 py-1">
-        <input class="cell" style="width: 56px" value="${escapeAttr(p.name)}" placeholder="이름"
+        <input class="cell" value="${escapeAttr(p.name)}" placeholder="이름"
                onchange="updateField(${p.id}, 'name', this.value)">
       </td>
       <td class="px-1 py-1">
@@ -763,7 +767,7 @@ function renderTable() {
           }</optgroup>`).join('')}
         </select>
         ${p.relation === '직접입력' ? `
-        <input class="cell mt-0.5" maxlength="40" value="${escapeAttr(p.label)}" placeholder="명칭(선택)"
+        <input class="cell cell-sub mt-0.5" maxlength="40" value="${escapeAttr(p.label)}" placeholder="명칭(선택)"
                onchange="updateField(${p.id}, 'label', this.value)" aria-label="직접입력 명칭" title="예: 큰아버지">` : ''}
       </td>
       <td class="px-1 py-1">
@@ -777,7 +781,7 @@ function renderTable() {
         </select>
       </td>
       <td class="px-1 py-1">
-        <input class="cell" style="width: 42px" value="${escapeAttr(p.birthYear)}" placeholder="YYYY"
+        <input class="cell" value="${escapeAttr(p.birthYear)}" placeholder="YYYY"
                onchange="updateField(${p.id}, 'birthYear', this.value)">
       </td>
       <td class="px-1 py-1">
